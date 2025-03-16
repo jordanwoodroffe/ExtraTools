@@ -50,19 +50,19 @@ public class MaidenOverlay extends Overlay
                 if (apiPoint != null)
                 {
                     // Convert net.runelite.api.Point to java.awt.Point
-                    Point screenPoint = new Point(apiPoint.getX(), apiPoint.getY());
+                    Point screenPoint = new Point(apiPoint.getX() - 12, apiPoint.getY() + 85);
 
                     String text = String.valueOf(countdown);
 
                     // Set font to bold and larger size
-                    graphics.setFont(new Font("Arial", Font.BOLD, 26));
+                    graphics.setFont(new Font("Arial", Font.BOLD, 30));
 
                     // Draw shadow
                     graphics.setColor(new Color(0x000000)); // Black shadow
                     graphics.drawString(text, screenPoint.x + 2, screenPoint.y + 2); // Offset by 2 pixels
 
-                    // Last tick before she attacks
-                    if (countdown == 3)
+                    // Last tick before attack
+                    if (countdown == 1)
                     {
                         graphics.setColor(new Color(0xFF00FA)); // #FF00FA
                     }

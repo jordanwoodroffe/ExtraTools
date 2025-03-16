@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.NPC;
 import net.runelite.api.NpcID;
+import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.NpcSpawned;
 import net.runelite.api.events.NpcDespawned;
@@ -21,8 +22,14 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class ExamplePlugin extends Plugin
 {
-    private static final int MAIDEN_ID = NpcID.THE_MAIDEN_OF_SUGADINTI; // Replace with the correct ID if needed
+    private static final int MAIDEN_ID = NpcID.THE_MAIDEN_OF_SUGADINTI; 
     private static final int MAIDEN_ATTACK_INTERVAL_TICKS = 10;
+
+    // Sotetseg attack animation IDs
+    private static final int[] SOTESEG_ATTACK_ANIMATION_IDS = {10864, 10865, 10867, 10868};
+
+    // Maiden attack animation IDs
+    private static final int[] MAIDEN_ATTACK_ANIMATION_IDS = {8091, 8092};
 
     @Inject
     private Client client;
@@ -36,8 +43,11 @@ public class ExamplePlugin extends Plugin
     @Inject
     private MaidenOverlay maidenOverlay;
 
+
     private NPC maiden;
     private int maidenCountdown = -1;
+
+    private boolean maidenResetThisTick = false;
 
     @Override
     protected void startUp() throws Exception
@@ -52,16 +62,17 @@ public class ExamplePlugin extends Plugin
         overlayManager.remove(maidenOverlay);
         maiden = null;
         maidenCountdown = -1;
+        maidenResetThisTick = false;
         log.info("STOPPED!");
     }
 
     @Subscribe
     public void onNpcSpawned(NpcSpawned event)
     {
-     if (event.getNpc().getId() == MAIDEN_ID)
+        if (event.getNpc().getId() == MAIDEN_ID)
         {
             maiden = event.getNpc();
-            maidenCountdown = MAIDEN_ATTACK_INTERVAL_TICKS; 
+            maidenCountdown = -1; // Timer will not start until the first attack animation
         }
     }
 
@@ -76,16 +87,45 @@ public class ExamplePlugin extends Plugin
     }
 
     @Subscribe
+    public void onAnimationChanged(AnimationChanged event)
+    {
+        // Log Maiden's animations and reset countdown for specific animations
+        if (event.getActor() == maiden)
+        {
+            int animationId = event.getActor().getAnimation();
+
+            // Check if the animation ID matches any of Maiden's attack animations
+            for (int attackAnimationId : MAIDEN_ATTACK_ANIMATION_IDS)
+            {
+                if (animationId == attackAnimationId)
+                {
+                    if (maidenCountdown == -1)
+                    {
+                        log.info("Maiden's first attack animation detected. Starting countdown.");
+                    }
+                    maidenCountdown = MAIDEN_ATTACK_INTERVAL_TICKS; // Start or reset countdown when attack animation is detected
+                    maidenResetThisTick = true; // Mark that the countdown was reset this tick
+                    log.info("Maiden attack animation detected: {}", animationId);
+                    break;
+                }
+            }
+
+            // Log all Maiden animations for debugging
+            log.info("Maiden animation ID: {}", animationId);
+        }
+    }
+
+    @Subscribe
     public void onGameTick(GameTick event)
     {
         if (maiden != null && maidenCountdown > 0)
         {
-            maidenCountdown--;
-            if (maidenCountdown == 0)
+            if (!maidenResetThisTick)
             {
-                maidenCountdown = MAIDEN_ATTACK_INTERVAL_TICKS; // Reset to 10 after attack
+                maidenCountdown--;
             }
         }
+        maidenResetThisTick = false; // Reset the flag for the next tick
     }
 
     public NPC getMaiden()
