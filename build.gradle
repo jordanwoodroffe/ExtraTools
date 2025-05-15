@@ -1,10 +1,25 @@
 plugins {
     id 'java'
+    id 'application'
 }
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
+}
+
+application {
+    mainClass = 'com.example.ExamplePluginTest'
+}
+
+// Add this configuration to include test classes in the run task
+tasks.named('run', JavaExec) {
+    classpath += sourceSets.test.runtimeClasspath
+    jvmArgs = [
+        '-ea',  // Enable assertions
+        '--add-exports=java.desktop/com.apple.eawt=ALL-UNNAMED',  // Allow access to Apple's EAWT
+        '--add-opens=java.desktop/java.awt=ALL-UNNAMED'  // Sometimes also needed
+    ]
 }
 
 repositories {
