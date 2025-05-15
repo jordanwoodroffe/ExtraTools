@@ -70,6 +70,9 @@ public class ExamplePlugin extends Plugin {
     private static final int OBJECT_FIRE = 56336;
     private static final int OBJECT_SHADOW = 56335;
 
+    private static final int GRAPHIC_FIRE_SPECIAL_PHASE2 = 3270; // Fire ball
+    private static final int GRAPHIC_SHADOW_SPECIAL_PHASE2 = 3259; // Shadow ball
+
     // Yama NPC ID
     private static final int YAMA_ID = 14176;
 
@@ -197,9 +200,9 @@ public class ExamplePlugin extends Plugin {
             yamaPhases.put(index, YamaPhase.MAGE);
         } else if (graphicId == GRAPHIC_RANGE) {
             yamaPhases.put(index, YamaPhase.RANGE);
-        } else if (graphicId == GRAPHIC_FIRE_SPECIAL) {
+        } else if (graphicId == GRAPHIC_FIRE_SPECIAL || graphicId == GRAPHIC_FIRE_SPECIAL_PHASE2) {
             yamaPhases.put(index, YamaPhase.FIRE_SPECIAL);
-        } else if (graphicId == GRAPHIC_SHADOW_SPECIAL) {
+        } else if (graphicId == GRAPHIC_SHADOW_SPECIAL || graphicId == GRAPHIC_SHADOW_SPECIAL_PHASE2) {
             yamaPhases.put(index, YamaPhase.SHADOW_SPECIAL);
         }
     }
