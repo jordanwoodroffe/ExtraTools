@@ -5,6 +5,7 @@ import net.runelite.api.Client;
 import net.runelite.api.NPC;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GraphicChanged;
+import net.runelite.api.events.GraphicsObjectCreated;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -29,6 +30,7 @@ import java.util.HashSet;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.Iterator;
 
 @Slf4j
 @PluginDescriptor(name = "Yama Helper", description = "Highlights Yama based on their current combat style")
@@ -212,7 +214,6 @@ public class ExamplePlugin extends Plugin {
 
             // Skip countdown for newly initialized timers this tick
             if (newlyInitializedTimers.contains(yamaIndex)) {
-
                 continue;
             }
 
