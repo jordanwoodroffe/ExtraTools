@@ -3,9 +3,6 @@ package com.example;
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
 import net.runelite.api.NPC;
-import net.runelite.api.GameObject;
-import net.runelite.api.Scene;
-import net.runelite.api.Tile;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GraphicChanged;
 import net.runelite.client.eventbus.Subscribe;
@@ -15,7 +12,6 @@ import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
-import net.runelite.client.ui.overlay.OverlayPriority;
 import net.runelite.api.Perspective;
 
 import net.runelite.api.coords.LocalPoint;
@@ -26,15 +22,15 @@ import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Color;
 import java.awt.Polygon;
+import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
+
 import java.util.Map;
-import java.util.Iterator;
 import java.util.Set;
 
+@Slf4j
 @PluginDescriptor(name = "Yama Helper", description = "Highlights Yama based on their current combat style")
 public class ExamplePlugin extends Plugin {
 
@@ -50,43 +46,67 @@ public class ExamplePlugin extends Plugin {
     // Track current Yama phases by NPC index
     private Map<Integer, YamaPhase> yamaPhases = new HashMap<>();
 
-    // Fixed tile positions to highlight
-    private static final List<TileHighlight> FIXED_TILE_HIGHLIGHTS = new ArrayList<>();
-
-    // Special object highlights for special attacks
-    private Map<WorldPoint, SpecialObjectHighlight> specialObjectHighlights = new HashMap<>();
-
     // Yama animation IDs
-    private static final int ANIMATION_MAGE_RANGE = 12144;
-    private static final int ANIMATION_SPECIAL = 12145;
+    private static final int ANIMATION_MELEE = 12146;
+    private static final int ANIMATION_ORB_ATTACK = 12146; // Same as melee
+    private static final int ANIMATION_MAGE = 12144;
 
     // Yama graphic IDs
     private static final int GRAPHIC_MAGE = 3246;
     private static final int GRAPHIC_RANGE = 3243;
-    private static final int GRAPHIC_FIRE_SPECIAL = 3253;
-    private static final int GRAPHIC_SHADOW_SPECIAL = 3256;
-
-    // Object IDs to highlight during special attacks
-    private static final int OBJECT_FIRE = 56336;
-    private static final int OBJECT_SHADOW = 56335;
-
-    private static final int GRAPHIC_FIRE_SPECIAL_PHASE2 = 3270; // Fire ball
-    private static final int GRAPHIC_SHADOW_SPECIAL_PHASE2 = 3259; // Shadow ball
+    private static final int GRAPHIC_GLYPH_ATTACK = 3253;
 
     // Yama NPC ID
     private static final int YAMA_ID = 14176;
 
+    // Attack cycle constants
+    private static final int ATTACK_CYCLE_TICKS = 8;
+    private static final int ENRAGE_ATTACK_CYCLE_TICKS = 7;
+
+    // Graphic for phase transition
+    private static final int GRAPHIC_PHASE_TRANSITION = 3276;
+
+    // Track last logged animation for each Yama to prevent duplicate logging
+    private Map<Integer, Integer> lastLoggedAnimations = new HashMap<>();
+
+    // Track attack timers for each Yama (NPC index -> ticks until next attack)
+    private Map<Integer, Integer> yamaAttackTimers = new HashMap<>();
+
+    // Track phase transition graphic occurrences for each Yama (NPC index -> count)
+    private Map<Integer, Integer> phaseTransitionCounts = new HashMap<>();
+
+    // Track which timers were just initialized this tick to prevent immediate
+    // countdown
+    private Set<Integer> newlyInitializedTimers = new HashSet<>();
+
+    // Track attack cooldowns to prevent multiple timer resets from duplicate
+    // animations
+    // Maps NPC index to the tick when the cooldown expires
+    private Map<Integer, Integer> attackCooldowns = new HashMap<>();
+
+    // Cooldown duration in ticks after detecting an attack
+    private static final int ATTACK_COOLDOWN_TICKS = 6;
+
     @Override
     protected void startUp() throws Exception {
         yamaPhases.clear();
-        specialObjectHighlights.clear();
+        lastLoggedAnimations.clear();
+        yamaAttackTimers.clear();
+        phaseTransitionCounts.clear();
+        newlyInitializedTimers.clear();
+        attackCooldowns.clear();
         overlayManager.add(overlay);
     }
 
     @Override
     protected void shutDown() throws Exception {
         yamaPhases.clear();
-        specialObjectHighlights.clear();
+
+        lastLoggedAnimations.clear();
+        yamaAttackTimers.clear();
+        phaseTransitionCounts.clear();
+        newlyInitializedTimers.clear();
+        attackCooldowns.clear();
         overlayManager.remove(overlay);
     }
 
@@ -109,31 +129,6 @@ public class ExamplePlugin extends Plugin {
         }
     }
 
-    // Class to track special object highlights
-    static class SpecialObjectHighlight {
-        private final WorldPoint center;
-        private final YamaPhase type;
-        private int ticksRemaining;
-
-        public SpecialObjectHighlight(WorldPoint center, YamaPhase type) {
-            this.center = center;
-            this.type = type;
-            this.ticksRemaining = 2;
-        }
-
-        public WorldPoint getCenter() {
-            return center;
-        }
-
-        public YamaPhase getType() {
-            return type;
-        }
-
-        public boolean updateTicks() {
-            return --ticksRemaining > 0;
-        }
-    }
-
     @Subscribe
     public void onGameTick(GameTick event) {
         if (client.getGameState().getState() < 30) {
@@ -142,20 +137,61 @@ public class ExamplePlugin extends Plugin {
 
         boolean yamaPresent = false;
         // Track all visible Yamas in the scene
-        for (NPC npc : client.getNpcs()) {
+        for (NPC npc : client.getTopLevelWorldView().npcs()) {
             if (npc != null && npc.getId() == YAMA_ID) {
                 yamaPresent = true;
                 int index = npc.getIndex();
+
+                // Log animation IDs for Yama only when they change
+                int animationId = npc.getAnimation();
+                if (animationId != -1) {
+                    Integer lastLogged = lastLoggedAnimations.get(index);
+                    if (lastLogged == null || lastLogged != animationId) {
+                        log.info("Yama (index " + index + ") animation: animationId=" + animationId);
+                        lastLoggedAnimations.put(index, animationId);
+                    }
+
+                    // Reset timer to appropriate ticks when Yama attacks, but only if not in
+                    // cooldown
+                    // Check for attack animation regardless of whether it changed
+                    if (isAttackAnimation(animationId)) {
+                        int currentTick = client.getTickCount();
+                        Integer cooldownExpiry = attackCooldowns.get(index);
+
+                        // Only reset timer if we're not in cooldown or cooldown has expired
+                        if (cooldownExpiry == null || currentTick >= cooldownExpiry) {
+                            int attackTicks = getAttackCycleTicks(index);
+                            yamaAttackTimers.put(index, attackTicks);
+                            newlyInitializedTimers.add(index);
+                            // Set cooldown to expire in 6 ticks
+                            attackCooldowns.put(index, currentTick + ATTACK_COOLDOWN_TICKS);
+                            log.info("Yama (index " + index + ") attack detected, timer reset to " + attackTicks +
+                                    " (cooldown until tick " + (currentTick + ATTACK_COOLDOWN_TICKS) + ")" +
+                                    (isYamaInEnragePhase(index) ? " [ENRAGE PHASE]" : ""));
+                        } else {
+                            log.info("Yama (index " + index + ") attack ignored - in cooldown until tick "
+                                    + cooldownExpiry);
+                        }
+                    }
+
+                    // Update phase based on animation if available (handle melee attacks here)
+                    if (animationId == ANIMATION_MELEE) {
+                        yamaPhases.put(index, YamaPhase.MELEE);
+                    }
+                }
 
                 // Initialize with UNKNOWN if we haven't seen this Yama before
                 if (!yamaPhases.containsKey(index)) {
                     yamaPhases.put(index, YamaPhase.UNKNOWN);
                 }
 
-                // Update phase based on animation if available
-                int animationId = npc.getAnimation();
-                if (animationId != -1) {
-                    updateYamaPhaseFromAnimation(index, animationId);
+                // Initialize timer if not present (start with appropriate timing)
+                if (!yamaAttackTimers.containsKey(index)) {
+                    int attackTicks = getAttackCycleTicks(index);
+                    yamaAttackTimers.put(index, attackTicks);
+                    newlyInitializedTimers.add(index);
+                    log.info("Yama (index " + index + ") timer initialized to " + attackTicks +
+                            (isYamaInEnragePhase(index) ? " [ENRAGE PHASE]" : ""));
                 }
             }
         }
@@ -163,21 +199,38 @@ public class ExamplePlugin extends Plugin {
         // If no Yama exists, clear all highlights and phases
         if (!yamaPresent) {
             yamaPhases.clear();
-            specialObjectHighlights.clear();
+            yamaAttackTimers.clear();
+            phaseTransitionCounts.clear();
+            attackCooldowns.clear();
             return;
         }
 
-        // Update special object highlights
-        Iterator<Map.Entry<WorldPoint, SpecialObjectHighlight>> it = specialObjectHighlights.entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry<WorldPoint, SpecialObjectHighlight> entry = it.next();
-            if (!entry.getValue().updateTicks()) {
-                it.remove();
+        // Update attack timers for all Yamas
+        for (Map.Entry<Integer, Integer> entry : yamaAttackTimers.entrySet()) {
+            int yamaIndex = entry.getKey();
+            int currentTicks = entry.getValue();
+
+            // Skip countdown for newly initialized timers this tick
+            if (newlyInitializedTimers.contains(yamaIndex)) {
+
+                continue;
+            }
+
+            // Only decrement if the timer is greater than 1
+            if (currentTicks > 1) {
+                // Countdown the timer
+                int newTicks = currentTicks - 1;
+                yamaAttackTimers.put(yamaIndex, newTicks);
+
+            } else {
+                // Timer at 1, next tick should be an attack
+
+                // Keep timer at 1 until attack is detected
             }
         }
 
-        // Find and highlight special objects when needed
-        findSpecialObjects();
+        // Clear the newly initialized timers set for next tick
+        newlyInitializedTimers.clear();
     }
 
     @Subscribe
@@ -196,80 +249,73 @@ public class ExamplePlugin extends Plugin {
         int index = npc.getIndex();
         int graphicId = npc.getGraphic();
 
+        // Log every graphic change event, including when graphics are cleared
+        log.info("Yama (index " + index + ") attack graphic: graphicId=" + graphicId);
+
+        // Track phase transition graphics (attack graphic 3276)
+        if (graphicId == GRAPHIC_PHASE_TRANSITION) {
+            int currentCount = phaseTransitionCounts.getOrDefault(index, 0);
+            phaseTransitionCounts.put(index, currentCount + 1);
+            log.info("Yama (index " + index + ") phase transition detected. Count: " + (currentCount + 1) +
+                    (currentCount + 1 >= 2 ? " - ENRAGE PHASE ACTIVATED" : ""));
+        }
+
+        // Reset timer when graphic-based attacks are detected, but only if not in
+        // cooldown
+        if (isAttackGraphic(graphicId)) {
+            int currentTick = client.getTickCount();
+            Integer cooldownExpiry = attackCooldowns.get(index);
+
+            // Only reset timer if we're not in cooldown or cooldown has expired
+            if (cooldownExpiry == null || currentTick >= cooldownExpiry) {
+                int attackTicks = getAttackCycleTicks(index);
+                yamaAttackTimers.put(index, attackTicks);
+                newlyInitializedTimers.add(index);
+                // Set cooldown to expire in 6 ticks
+                attackCooldowns.put(index, currentTick + ATTACK_COOLDOWN_TICKS);
+                log.info("Yama (index " + index + ") graphic attack detected, timer reset to " + attackTicks +
+                        " (cooldown until tick " + (currentTick + ATTACK_COOLDOWN_TICKS) + ")" +
+                        (isYamaInEnragePhase(index) ? " [ENRAGE PHASE]" : ""));
+            } else {
+                log.info(
+                        "Yama (index " + index + ") graphic attack ignored - in cooldown until tick " + cooldownExpiry);
+            }
+        }
+
         if (graphicId == GRAPHIC_MAGE) {
             yamaPhases.put(index, YamaPhase.MAGE);
         } else if (graphicId == GRAPHIC_RANGE) {
             yamaPhases.put(index, YamaPhase.RANGE);
-        } else if (graphicId == GRAPHIC_FIRE_SPECIAL || graphicId == GRAPHIC_FIRE_SPECIAL_PHASE2) {
-            yamaPhases.put(index, YamaPhase.FIRE_SPECIAL);
-        } else if (graphicId == GRAPHIC_SHADOW_SPECIAL || graphicId == GRAPHIC_SHADOW_SPECIAL_PHASE2) {
-            yamaPhases.put(index, YamaPhase.SHADOW_SPECIAL);
+        } else if (graphicId == GRAPHIC_GLYPH_ATTACK) {
+            yamaPhases.put(index, YamaPhase.FIRE_SPECIAL); // Assuming glyph is a fire special attack
         }
     }
 
-    private void updateYamaPhaseFromAnimation(int npcIndex, int animationId) {
-        if (animationId == ANIMATION_MAGE_RANGE) {
-            // Animation is shared between mage and range
-            // We don't update the phase here as we'll set it in onGraphicChanged
-        } else if (animationId == ANIMATION_SPECIAL) {
-            // This is a special attack animation
-            // Phase will be set in onGraphicChanged based on the graphic ID
-        }
+    // Helper method to check if an animation ID represents an attack
+    private boolean isAttackAnimation(int animationId) {
+        return animationId == ANIMATION_MELEE ||
+                animationId == ANIMATION_ORB_ATTACK ||
+                animationId == ANIMATION_MAGE;
     }
 
-    private void findSpecialObjects() {
-        // Check if any Yama is doing a special attack
-        boolean fireSpecialActive = false;
-        boolean shadowSpecialActive = false;
+    // Helper method to check if a graphic ID represents an attack
+    private boolean isAttackGraphic(int graphicId) {
+        return graphicId == GRAPHIC_MAGE ||
+                graphicId == GRAPHIC_RANGE ||
+                graphicId == GRAPHIC_GLYPH_ATTACK;
+    }
 
-        for (YamaPhase phase : yamaPhases.values()) {
-            if (phase == YamaPhase.FIRE_SPECIAL) {
-                fireSpecialActive = true;
-            } else if (phase == YamaPhase.SHADOW_SPECIAL) {
-                shadowSpecialActive = true;
-            }
-        }
+    // Helper method to check if Yama is in enrage phase (3rd phase after 2
+    // transition graphics)
+    public boolean isYamaInEnragePhase(int npcIndex) {
+        Integer transitionCount = phaseTransitionCounts.get(npcIndex);
+        return transitionCount != null && transitionCount >= 2;
+    }
 
-        // If neither special is active, don't add new highlights
-        if (!fireSpecialActive && !shadowSpecialActive) {
-            return;
-        }
-
-        Scene scene = client.getScene();
-        Tile[][][] tiles = scene.getTiles();
-
-        for (int z = 0; z < tiles.length; z++) {
-            for (int x = 0; x < tiles[z].length; x++) {
-                for (int y = 0; y < tiles[z][x].length; y++) {
-                    Tile tile = tiles[z][x][y];
-                    if (tile == null) {
-                        continue;
-                    }
-
-                    GameObject[] gameObjects = tile.getGameObjects();
-                    if (gameObjects == null) {
-                        continue;
-                    }
-
-                    for (GameObject gameObject : gameObjects) {
-                        if (gameObject == null) {
-                            continue;
-                        }
-
-                        int objectId = gameObject.getId();
-                        WorldPoint worldPoint = gameObject.getWorldLocation();
-
-                        if (fireSpecialActive && objectId == OBJECT_FIRE) {
-                            specialObjectHighlights.put(worldPoint,
-                                    new SpecialObjectHighlight(worldPoint, YamaPhase.FIRE_SPECIAL));
-                        } else if (shadowSpecialActive && objectId == OBJECT_SHADOW) {
-                            specialObjectHighlights.put(worldPoint,
-                                    new SpecialObjectHighlight(worldPoint, YamaPhase.SHADOW_SPECIAL));
-                        }
-                    }
-                }
-            }
-        }
+    // Helper method to get the appropriate attack cycle ticks based on enrage
+    // status
+    private int getAttackCycleTicks(int npcIndex) {
+        return isYamaInEnragePhase(npcIndex) ? ENRAGE_ATTACK_CYCLE_TICKS : ATTACK_CYCLE_TICKS;
     }
 
     // Get the current phase for a specific Yama
@@ -277,9 +323,9 @@ public class ExamplePlugin extends Plugin {
         return yamaPhases.getOrDefault(npcIndex, YamaPhase.UNKNOWN);
     }
 
-    // Get special object highlights
-    public Map<WorldPoint, SpecialObjectHighlight> getSpecialObjectHighlights() {
-        return specialObjectHighlights;
+    // Get the attack timer for a specific Yama
+    public int getYamaAttackTimer(int npcIndex) {
+        return yamaAttackTimers.getOrDefault(npcIndex, ATTACK_CYCLE_TICKS);
     }
 
     // Yama combat phases
@@ -288,6 +334,7 @@ public class ExamplePlugin extends Plugin {
         RANGE(new Color(144, 238, 144)), // Soft green
         FIRE_SPECIAL(new Color(255, 200, 100, 50)), // Lighter soft orange, more transparent
         SHADOW_SPECIAL(new Color(180, 150, 240, 50)), // Lighter soft purple, more transparent
+        MELEE(new Color(240, 100, 100, 120)), // Soft red
         UNKNOWN(Color.GRAY);
 
         private final Color color;
@@ -312,14 +359,13 @@ public class ExamplePlugin extends Plugin {
             this.client = client;
             this.plugin = plugin;
             setPosition(OverlayPosition.DYNAMIC);
-            setPriority(OverlayPriority.MED);
             setLayer(OverlayLayer.ABOVE_SCENE);
         }
 
         @Override
         public Dimension render(Graphics2D graphics) {
             // First, render existing Yama highlights
-            for (NPC npc : client.getNpcs()) {
+            for (NPC npc : client.getTopLevelWorldView().npcs()) {
                 if (npc == null || npc.getId() != YAMA_ID) {
                     continue;
                 }
@@ -379,13 +425,50 @@ public class ExamplePlugin extends Plugin {
                 // Draw just the outer border with solid color
                 graphics.setColor(tileColor);
                 graphics.draw(borderPoly);
+
+                // Display attack timer over the center of Yama
+                int attackTimer = plugin.getYamaAttackTimer(npc.getIndex());
+                if (attackTimer > 0) {
+                    // Get center point of the NPC for text positioning
+                    LocalPoint center = npc.getLocalLocation();
+                    if (center != null) {
+                        net.runelite.api.Point textPoint = Perspective.localToCanvas(client, center, 0);
+                        if (textPoint != null) {
+                            // Set text properties - bold bright teal 48px font
+                            String timerText = String.valueOf(attackTimer);
+                            java.awt.Font font = new java.awt.Font("Arial", java.awt.Font.BOLD, 36);
+                            graphics.setFont(font);
+
+                            java.awt.FontMetrics metrics = graphics.getFontMetrics();
+                            int textWidth = metrics.stringWidth(timerText);
+                            int textHeight = metrics.getHeight();
+                            int textX = textPoint.getX() - (textWidth / 2);
+                            int textY = textPoint.getY() + (textHeight / 4); // Center vertically
+
+                            // Draw outline for visibility
+                            graphics.setColor(Color.BLACK);
+                            graphics.drawString(timerText, textX - 2, textY - 2);
+                            graphics.drawString(timerText, textX + 2, textY - 2);
+                            graphics.drawString(timerText, textX - 2, textY + 2);
+                            graphics.drawString(timerText, textX + 2, textY + 2);
+                            graphics.drawString(timerText, textX - 2, textY);
+                            graphics.drawString(timerText, textX + 2, textY);
+                            graphics.drawString(timerText, textX, textY - 2);
+                            graphics.drawString(timerText, textX, textY + 2);
+
+                            // Draw main text - bright red for '1', bright teal for others
+                            Color textColor;
+                            if (attackTimer == 1) {
+                                textColor = new Color(255, 0, 0); // Bright red for '1'
+                            } else {
+                                textColor = new Color(0, 255, 255); // Bright teal for other numbers
+                            }
+                            graphics.setColor(textColor);
+                            graphics.drawString(timerText, textX, textY);
+                        }
+                    }
+                }
             }
-
-            // Render fixed tile highlights
-            renderFixedTileHighlights(graphics);
-
-            // Render special object highlights
-            renderSpecialObjectHighlights(graphics);
 
             return null;
         }
@@ -399,145 +482,6 @@ public class ExamplePlugin extends Plugin {
 
             targetPoly.addPoint(sourcePoly.xpoints[startIdx], sourcePoly.ypoints[startIdx]);
             targetPoly.addPoint(sourcePoly.xpoints[endIdx], sourcePoly.ypoints[endIdx]);
-        }
-
-        // Method to render the fixed tile highlights
-        private void renderFixedTileHighlights(Graphics2D graphics) {
-            for (TileHighlight tileHighlight : FIXED_TILE_HIGHLIGHTS) {
-                WorldPoint worldPoint = tileHighlight.getWorldPoint();
-
-                // If the tile is on a different plane, skip it
-                if (worldPoint.getPlane() != client.getPlane()) {
-                    continue;
-                }
-
-                // Convert world point to local point
-                LocalPoint localPoint = LocalPoint.fromWorld(client, worldPoint);
-                if (localPoint == null) {
-                    continue;
-                }
-
-                // Get the tile polygon
-                Polygon tilePoly = Perspective.getCanvasTilePoly(client, localPoint);
-                if (tilePoly == null) {
-                    continue;
-                }
-
-                // Draw filled tile with semi-transparent color
-                graphics.setColor(tileHighlight.getColor());
-                graphics.fill(tilePoly);
-
-                // Draw tile border with solid color
-                graphics.setColor(new Color(
-                        tileHighlight.getColor().getRed(),
-                        tileHighlight.getColor().getGreen(),
-                        tileHighlight.getColor().getBlue(),
-                        255));
-                graphics.draw(tilePoly);
-            }
-        }
-
-        private void renderSpecialObjectHighlights(Graphics2D graphics) {
-            Map<WorldPoint, SpecialObjectHighlight> highlights = plugin.getSpecialObjectHighlights();
-
-            for (SpecialObjectHighlight highlight : highlights.values()) {
-                WorldPoint center = highlight.getCenter();
-
-                // Skip if on different plane
-                if (center.getPlane() != client.getPlane()) {
-                    continue;
-                }
-
-                Color highlightColor = highlight.getType().getColor();
-                // Create a lighter variant for surrounding tiles
-                Color lighterColor = new Color(
-                        Math.min(highlightColor.getRed() + 50, 255),
-                        Math.min(highlightColor.getGreen() + 50, 255),
-                        Math.min(highlightColor.getBlue() + 50, 255),
-                        highlightColor.getAlpha());
-
-                // Get the corner points for the 3x3 area
-                WorldPoint swCorner = new WorldPoint(center.getX() - 1, center.getY() - 1, center.getPlane());
-                WorldPoint seCorner = new WorldPoint(center.getX() + 1, center.getY() - 1, center.getPlane());
-                WorldPoint neCorner = new WorldPoint(center.getX() + 1, center.getY() + 1, center.getPlane());
-                WorldPoint nwCorner = new WorldPoint(center.getX() - 1, center.getY() + 1, center.getPlane());
-
-                LocalPoint swLocal = LocalPoint.fromWorld(client, swCorner);
-                LocalPoint seLocal = LocalPoint.fromWorld(client, seCorner);
-                LocalPoint neLocal = LocalPoint.fromWorld(client, neCorner);
-                LocalPoint nwLocal = LocalPoint.fromWorld(client, nwCorner);
-
-                if (swLocal == null || seLocal == null || neLocal == null || nwLocal == null) {
-                    continue;
-                }
-
-                Polygon swPoly = Perspective.getCanvasTilePoly(client, swLocal);
-                Polygon sePoly = Perspective.getCanvasTilePoly(client, seLocal);
-                Polygon nePoly = Perspective.getCanvasTilePoly(client, neLocal);
-                Polygon nwPoly = Perspective.getCanvasTilePoly(client, nwLocal);
-
-                if (swPoly == null || sePoly == null || nePoly == null || nwPoly == null) {
-                    continue;
-                }
-
-                // Create the outer border polygon
-                Polygon outerBorderPoly = new Polygon();
-
-                // Add points to create the outer border
-                // South edge (SW to SE)
-                addPointsToPolygon(outerBorderPoly, swPoly, 0, 1);
-                // East edge (SE to NE)
-                addPointsToPolygon(outerBorderPoly, sePoly, 1, 2);
-                // North edge (NE to NW)
-                addPointsToPolygon(outerBorderPoly, nePoly, 2, 3);
-                // West edge (NW to SW)
-                addPointsToPolygon(outerBorderPoly, nwPoly, 3, 0);
-
-                // Draw all tiles in the 3x3 area
-                for (int xOffset = -1; xOffset <= 1; xOffset++) {
-                    for (int yOffset = -1; yOffset <= 1; yOffset++) {
-                        WorldPoint currentTile = new WorldPoint(
-                                center.getX() + xOffset,
-                                center.getY() + yOffset,
-                                center.getPlane());
-
-                        LocalPoint localTile = LocalPoint.fromWorld(client, currentTile);
-                        if (localTile == null) {
-                            continue;
-                        }
-
-                        Polygon tilePoly = Perspective.getCanvasTilePoly(client, localTile);
-                        if (tilePoly == null) {
-                            continue;
-                        }
-
-                        // Determine if this is the center tile
-                        boolean isCenter = xOffset == 0 && yOffset == 0;
-
-                        // Fill with appropriate color
-                        graphics.setColor(isCenter ? highlightColor : lighterColor);
-                        graphics.fill(tilePoly);
-
-                        // Draw border only for center tile
-                        if (isCenter) {
-                            graphics.setColor(new Color(
-                                    highlightColor.getRed(),
-                                    highlightColor.getGreen(),
-                                    highlightColor.getBlue(),
-                                    255));
-                            graphics.draw(tilePoly);
-                        }
-                    }
-                }
-
-                // Draw the outer border with solid color
-                graphics.setColor(new Color(
-                        highlightColor.getRed(),
-                        highlightColor.getGreen(),
-                        highlightColor.getBlue(),
-                        255));
-                graphics.draw(outerBorderPoly);
-            }
         }
     }
 }
