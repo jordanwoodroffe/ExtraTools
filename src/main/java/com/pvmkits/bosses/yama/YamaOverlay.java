@@ -1,5 +1,6 @@
-package com.yamahelper;
+package com.pvmkits.bosses.yama;
 
+import com.pvmkits.PvmKitsConfig;
 import net.runelite.api.Client;
 import net.runelite.api.NPC;
 import net.runelite.api.Perspective;
@@ -9,17 +10,17 @@ import net.runelite.client.ui.overlay.*;
 import javax.inject.Inject;
 import java.awt.*;
 
-public class YamaHelperOverlay extends Overlay {
+public class YamaOverlay extends Overlay {
 
     private final Client client;
-    private final YamaHelperPlugin plugin;
-    private final YamaHelperConfig config;
+    private final YamaHandler yamaHandler;
+    private final PvmKitsConfig config;
     private static final int YAMA_SIZE = 5; // Yama is 5x5 tiles
 
     @Inject
-    public YamaHelperOverlay(Client client, YamaHelperPlugin plugin, YamaHelperConfig config) {
+    public YamaOverlay(Client client, YamaHandler yamaHandler, PvmKitsConfig config) {
         this.client = client;
-        this.plugin = plugin;
+        this.yamaHandler = yamaHandler;
         this.config = config;
 
         setPosition(OverlayPosition.DYNAMIC);
@@ -29,7 +30,7 @@ public class YamaHelperOverlay extends Overlay {
     @Override
     public Dimension render(Graphics2D graphics) {
         // Get all Yama NPCs in the scene
-        for (NPC npc : plugin.getYamaNpcs()) {
+        for (NPC npc : yamaHandler.getYamaNpcs()) {
             if (npc == null) {
                 continue;
             }
@@ -118,7 +119,7 @@ public class YamaHelperOverlay extends Overlay {
     }
 
     private void renderAttackStyleOverlay(Graphics2D graphics, NPC npc, int npcIndex) {
-        YamaHelperPlugin.YamaPhase phase = plugin.getYamaPhase(npcIndex);
+        YamaHandler.YamaPhase phase = yamaHandler.getYamaPhase(npcIndex);
         Color phaseColor = getPhaseColor(phase);
 
         if (phaseColor == null) {
@@ -175,7 +176,7 @@ public class YamaHelperOverlay extends Overlay {
     }
 
     private void renderAttackTimer(Graphics2D graphics, NPC npc, int npcIndex) {
-        int attackTimer = plugin.getYamaAttackTimer(npcIndex);
+        int attackTimer = yamaHandler.getYamaAttackTimer(npcIndex);
         if (attackTimer <= 0) {
             return;
         }
@@ -224,7 +225,7 @@ public class YamaHelperOverlay extends Overlay {
         graphics.drawString(timerText, textX, textY);
     }
 
-    private Color getPhaseColor(YamaHelperPlugin.YamaPhase phase) {
+    private Color getPhaseColor(YamaHandler.YamaPhase phase) {
         switch (phase) {
             case MELEE:
                 return config.meleeColor();

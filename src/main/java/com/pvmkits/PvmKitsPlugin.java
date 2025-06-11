@@ -1,0 +1,138 @@
+package com.pvmkits;
+
+import com.google.inject.Provides;
+import com.pvmkits.bosses.yama.YamaHandler;
+import com.pvmkits.bosses.yama.YamaOverlay;
+import com.pvmkits.core.BossHandler;
+import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Client;
+import net.runelite.api.events.AnimationChanged;
+import net.runelite.api.events.GameTick;
+import net.runelite.api.events.GraphicChanged;
+import net.runelite.client.config.ConfigManager;
+import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.plugins.Plugin;
+import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.ui.overlay.OverlayManager;
+
+import javax.inject.Inject;
+import java.util.ArrayList;
+import java.util.List;
+
+@Slf4j
+@PluginDescriptor(name = "PVM Kits", description = "Multi-boss PVM assistance toolkit with mechanics overlays and timers", tags = {
+        "combat", "boss", "pvm", "mechanics", "yama" }, enabledByDefault = false)
+public class PvmKitsPlugin extends Plugin {
+
+    @Inject
+    private Client client;
+
+    @Inject
+    private OverlayManager overlayManager;
+
+    @Inject
+    private PvmKitsConfig config;
+
+    @Inject
+    private YamaHandler yamaHandler;
+
+    @Inject
+    private YamaOverlay yamaOverlay;
+
+    // List of all boss handlers - currently only Yama
+    private List<BossHandler> bossHandlers;
+
+    // Current active boss handler
+    private BossHandler activeBossHandler;
+
+    @Override
+    protected void startUp() throws Exception {
+        // Initialize boss handlers list
+        bossHandlers = new ArrayList<>();
+        bossHandlers.add(yamaHandler);
+
+        // TODO: Add other boss handlers here when implemented
+        // bossHandlers.add(verzikHandler);
+        // bossHandlers.add(nyloHandler);
+        // etc.
+
+        activeBossHandler = null;
+        overlayManager.add(yamaOverlay);
+
+        log.info("PVM Kits plugin started!");
+    }
+
+    @Override
+    protected void shutDown() throws Exception {
+        // Reset all boss handlers
+        for (BossHandler handler : bossHandlers) {
+            handler.reset();
+        }
+
+        activeBossHandler = null;
+        overlayManager.remove(yamaOverlay);
+
+        log.info("PVM Kits plugin stopped!");
+    }
+
+    @Subscribe
+    public void onGameTick(GameTick event) {
+        // Determine which boss area we're in (if any)
+        BossHandler newActiveBoss = null;
+        for (BossHandler handler : bossHandlers) {
+            if (handler.isInBossArea(client)) {
+                newActiveBoss = handler;
+                break; // Use first matching boss handler
+            }
+        }
+
+        // If we switched boss areas, reset the previous handler
+        if (activeBossHandler != newActiveBoss) {
+            if (activeBossHandler != null) {
+                activeBossHandler.reset();
+                log.info("Left {} area", activeBossHandler.getBossName());
+            }
+
+            activeBossHandler = newActiveBoss;
+
+            if (activeBossHandler != null) {
+                log.info("Entered {} area", activeBossHandler.getBossName());
+            }
+        }
+
+        // Forward event to active boss handler
+        if (activeBossHandler != null) {
+            activeBossHandler.onGameTick(event);
+        }
+    }
+
+    @Subscribe
+    public void onAnimationChanged(AnimationChanged event) {
+        // Forward to active boss handler
+        if (activeBossHandler != null) {
+            activeBossHandler.onAnimationChanged(event);
+        }
+    }
+
+    @Subscribe
+    public void onGraphicChanged(GraphicChanged event) {
+        // Forward to active boss handler
+        if (activeBossHandler != null) {
+            activeBossHandler.onGraphicChanged(event);
+        }
+    }
+
+    // Getters for access by overlays and other components
+    public BossHandler getActiveBossHandler() {
+        return activeBossHandler;
+    }
+
+    public YamaHandler getYamaHandler() {
+        return yamaHandler;
+    }
+
+    @Provides
+    PvmKitsConfig provideConfig(ConfigManager configManager) {
+        return configManager.getConfig(PvmKitsConfig.class);
+    }
+}
