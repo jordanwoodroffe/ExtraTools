@@ -179,17 +179,12 @@ public class VerzikOverlay extends Overlay {
     }
 
     private Color getAttackStyleColor(VerzikHandler.VerzikAttackStyle attackStyle) {
-        switch (attackStyle) {
-            case RANGE:
-                return config.verzikRangeColor();
-            case MAGE:
-                return config.verzikMageColor();
-            case UNKNOWN:
-                // Show a default color for UNKNOWN state (like YamaPhase.UNKNOWN)
-                return new Color(128, 128, 128, 80); // Light gray, semi-transparent
-            default:
-                return null;
+        if (attackStyle == null) {
+            return new Color(128, 128, 128, 80); // Light gray for null
         }
+
+        // Use the color from the enum directly
+        return attackStyle.getColor();
     }
 
     // Helper method to add points from one polygon to another (same as YamaOverlay)

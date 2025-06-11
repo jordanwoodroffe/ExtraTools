@@ -35,14 +35,14 @@ public class VerzikHandler implements BossHandler {
     private VerzikAttackStyle currentAttackStyle = VerzikAttackStyle.UNKNOWN;
     private boolean isEnraged = false; // Track if P3 is enraged
 
-    // Track attack timers
+    // Track attack timer (following Yama pattern - no timerActive flag needed)
     private int attackTimer = 0;
-    private boolean timerActive = false;
+    private boolean newlyInitializedTimer = false;
 
     // Track last animations to prevent duplicates
     private int lastAnimationId = -1;
 
-    // Attack cooldown tracking
+    // Attack cooldown tracking (following Yama pattern)
     private int attackCooldownExpiry = 0;
 
     @Override
@@ -76,31 +76,49 @@ public class VerzikHandler implements BossHandler {
         int animationId = npc.getAnimation();
 
         // DEBUG: Log all Verzik animations for ID discovery
-        log.info("VERZIK DEBUG - NPC ID: {}, Animation ID: {}", npc.getId(), animationId);
+        log.info("VERZIK DEBUG - NPC ID: {}, Animation ID: {}, LastAnimationId: {}", npc.getId(), animationId,
+                lastAnimationId);
 
+        // For attack animations, we need to check cooldown instead of just duplicate
+        // detection
+        // because Verzik can trigger the same attack animation multiple times
+        if (animationId == VERZIK_ATTACK_ANIMATION) {
+            // Check if we're in attack cooldown for attack animations
+            int currentTick = client.getTickCount();
+            log.info("VERZIK DEBUG - Attack animation detected, checking cooldown: current tick {}, cooldown expiry {}",
+                    currentTick, attackCooldownExpiry);
+            if (attackCooldownExpiry > currentTick) {
+                log.info(
+                        "VERZIK DEBUG - Attack in cooldown, ignoring attack animation. Current tick: {}, cooldown expiry: {}",
+                        currentTick, attackCooldownExpiry);
+                return;
+            }
+
+            log.info("VERZIK DEBUG - Attack animation passed cooldown check, proceeding to process attack");
+
+            // Default to range, will be corrected by graphic if it's mage
+            currentAttackStyle = VerzikAttackStyle.RANGE;
+
+            // Reset attack timer (following Yama pattern)
+            resetAttackTimer();
+            newlyInitializedTimer = true;
+            attackCooldownExpiry = currentTick + ATTACK_COOLDOWN_TICKS;
+
+            log.info("Verzik attack detected: {} (Timer reset to {}, Cooldown expiry: {})",
+                    currentAttackStyle, attackTimer, attackCooldownExpiry);
+
+            lastAnimationId = animationId;
+            return;
+        }
+
+        // For non-attack animations, use normal duplicate detection
         if (animationId == lastAnimationId) {
+            log.info("VERZIK DEBUG - Skipping duplicate non-attack animation: {}", animationId);
             return; // Skip duplicate animations
         }
 
         lastAnimationId = animationId;
-
-        // Check if we're in attack cooldown
-        int currentTick = client.getTickCount();
-        if (attackCooldownExpiry > currentTick) {
-            return;
-        }
-
-        // Handle attack animations (both mage and range use animation -1)
-        if (animationId == VERZIK_ATTACK_ANIMATION) {
-            // Default to range, will be corrected by graphic if it's mage
-            currentAttackStyle = VerzikAttackStyle.RANGE;
-
-            // Reset attack timer and set cooldown
-            resetAttackTimer();
-            attackCooldownExpiry = currentTick + ATTACK_COOLDOWN_TICKS;
-
-            log.info("Verzik attack detected: {} (Timer reset to {})", currentAttackStyle, attackTimer);
-        }
+        log.info("VERZIK DEBUG - Non-attack animation processed: {}", animationId);
     }
 
     @Override
@@ -109,6 +127,7 @@ public class VerzikHandler implements BossHandler {
 
         // Note: Using deprecated getGraphic() method - should be updated when API
         // changes
+        @SuppressWarnings("deprecation")
         int graphicId = actor.getGraphic();
 
         // DEBUG: Log all graphics for discovery
@@ -130,8 +149,9 @@ public class VerzikHandler implements BossHandler {
 
         // Handle verzik projectile graphics on players
         if (graphicId == VERZIK_MAGE_GRAPHIC) {
+            // Set mage attack style when graphic is detected
             currentAttackStyle = VerzikAttackStyle.MAGE;
-            log.info("Verzik mage attack detected (graphic 1581)");
+            log.info("Verzik mage attack detected (graphic 1581) - Attack style updated to MAGE");
         }
     }
 
@@ -147,10 +167,12 @@ public class VerzikHandler implements BossHandler {
             if (npc != null && npc.getId() == VERZIK_NPC_ID) {
                 verzikPresent = true;
 
-                // Initialize timer if not active
-                if (!timerActive) {
+                // Initialize timer if not present (following Yama pattern)
+                if (attackTimer == 0) {
                     resetAttackTimer();
-                    timerActive = true;
+                    newlyInitializedTimer = true;
+                    log.info("Verzik timer initialized to {} ({})", attackTimer,
+                            (isEnraged ? "[ENRAGE PHASE]" : "[NORMAL PHASE]"));
                 }
                 break;
             }
@@ -161,9 +183,21 @@ public class VerzikHandler implements BossHandler {
             return;
         }
 
-        // Update attack timer
-        if (timerActive && attackTimer > 0) {
-            attackTimer--;
+        // Update attack timer (following Yama pattern)
+        if (attackTimer > 0) {
+            // Skip countdown for newly initialized timer this tick
+            if (newlyInitializedTimer) {
+                newlyInitializedTimer = false;
+                return;
+            }
+
+            // Only decrement if the timer is greater than 1
+            if (attackTimer > 1) {
+                attackTimer--;
+            } else {
+                // Timer at 1, next tick should be an attack
+                // Keep timer at 1 until attack is detected (like Yama)
+            }
         }
     }
 
@@ -181,7 +215,7 @@ public class VerzikHandler implements BossHandler {
     public void reset() {
         currentAttackStyle = VerzikAttackStyle.UNKNOWN;
         attackTimer = 0;
-        timerActive = false;
+        newlyInitializedTimer = false;
         lastAnimationId = -1;
         attackCooldownExpiry = 0;
         isEnraged = false;
@@ -202,7 +236,7 @@ public class VerzikHandler implements BossHandler {
     }
 
     public boolean isTimerActive() {
-        return timerActive;
+        return attackTimer > 0;
     }
 
     public boolean isEnraged() {
@@ -211,9 +245,9 @@ public class VerzikHandler implements BossHandler {
 
     // Verzik attack styles
     public enum VerzikAttackStyle {
-        RANGE(new Color(128, 0, 128, 150)), // Purple - Range projectiles
-        MAGE(new Color(0, 255, 0, 150)), // Green - Mage projectiles
-        UNKNOWN(Color.GRAY);
+        RANGE(new Color(0, 255, 0, 150)), // Green - Range projectiles
+        MAGE(new Color(0, 0, 255, 150)), // Blue - Mage projectiles
+        UNKNOWN(new Color(128, 128, 128, 80)); // Light gray for initial state
 
         private final Color color;
 

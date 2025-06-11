@@ -20,6 +20,7 @@ tasks.named('run', JavaExec) {
         '--add-exports=java.desktop/com.apple.eawt=ALL-UNNAMED',  // Allow access to Apple's EAWT
         '--add-opens=java.desktop/java.awt=ALL-UNNAMED'  // Sometimes also needed
     ]
+    args = ['--developer-mode']  // Enable developer tools plugin
 }
 
 repositories {
