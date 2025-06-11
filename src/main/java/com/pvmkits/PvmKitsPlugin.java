@@ -3,6 +3,8 @@ package com.pvmkits;
 import com.google.inject.Provides;
 import com.pvmkits.bosses.yama.YamaHandler;
 import com.pvmkits.bosses.yama.YamaOverlay;
+import com.pvmkits.bosses.verzik.VerzikHandler;
+import com.pvmkits.bosses.verzik.VerzikOverlay;
 import com.pvmkits.core.BossHandler;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
@@ -21,7 +23,7 @@ import java.util.List;
 
 @Slf4j
 @PluginDescriptor(name = "PVM Kits", description = "Multi-boss PVM assistance toolkit with mechanics overlays and timers", tags = {
-        "combat", "boss", "pvm", "mechanics", "yama" }, enabledByDefault = false)
+        "combat", "boss", "pvm", "mechanics", "yama", "verzik", "tob" }, enabledByDefault = false)
 public class PvmKitsPlugin extends Plugin {
 
     @Inject
@@ -39,7 +41,13 @@ public class PvmKitsPlugin extends Plugin {
     @Inject
     private YamaOverlay yamaOverlay;
 
-    // List of all boss handlers - currently only Yama
+    @Inject
+    private VerzikHandler verzikHandler;
+
+    @Inject
+    private VerzikOverlay verzikOverlay;
+
+    // List of all boss handlers - Yama, Verzik...
     private List<BossHandler> bossHandlers;
 
     // Current active boss handler
@@ -50,14 +58,15 @@ public class PvmKitsPlugin extends Plugin {
         // Initialize boss handlers list
         bossHandlers = new ArrayList<>();
         bossHandlers.add(yamaHandler);
+        bossHandlers.add(verzikHandler);
 
         // TODO: Add other boss handlers here when implemented
-        // bossHandlers.add(verzikHandler);
         // bossHandlers.add(nyloHandler);
         // etc.
 
         activeBossHandler = null;
         overlayManager.add(yamaOverlay);
+        overlayManager.add(verzikOverlay);
 
         log.info("PVM Kits plugin started!");
     }
@@ -71,6 +80,7 @@ public class PvmKitsPlugin extends Plugin {
 
         activeBossHandler = null;
         overlayManager.remove(yamaOverlay);
+        overlayManager.remove(verzikOverlay);
 
         log.info("PVM Kits plugin stopped!");
     }
@@ -129,6 +139,10 @@ public class PvmKitsPlugin extends Plugin {
 
     public YamaHandler getYamaHandler() {
         return yamaHandler;
+    }
+
+    public VerzikHandler getVerzikHandler() {
+        return verzikHandler;
     }
 
     @Provides

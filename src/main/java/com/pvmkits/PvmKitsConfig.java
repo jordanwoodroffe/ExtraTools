@@ -12,6 +12,9 @@ public interface PvmKitsConfig extends Config {
     @ConfigSection(name = "Yama", description = "Yama boss mechanics assistance", position = 1)
     String yama = "yama";
 
+    @ConfigSection(name = "Verzik", description = "Verzik boss mechanics assistance", position = 2)
+    String verzik = "verzik";
+
     // General Settings
     @ConfigItem(keyName = "showDebugInfo", name = "Show Debug Info", description = "Display debug information in chat", section = general, position = 0)
     default boolean showDebugInfo() {
@@ -82,6 +85,57 @@ public interface PvmKitsConfig extends Config {
     @ConfigItem(keyName = "showBorderOnly", name = "Show Border Only", description = "Only show the border of Yama's area instead of filling it", section = yama, position = 12)
     default boolean showBorderOnly() {
         return false;
+    }
+
+    // Verzik Settings
+    @ConfigItem(keyName = "enableVerzik", name = "Enable Verzik", description = "Enable Verzik boss mechanics assistance", section = verzik, position = 0)
+    default boolean enableVerzik() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showVerzikTimer", name = "Show Attack Timer", description = "Display attack countdown timer", section = verzik, position = 1)
+    default boolean showVerzikTimer() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "verzikMeleeColor", name = "Melee Attack Color", description = "Color to highlight Verzik during melee attacks", section = verzik, position = 2)
+    default Color verzikMeleeColor() {
+        return new Color(240, 100, 100, 120); // Same as Yama melee color
+    }
+
+    @ConfigItem(keyName = "verzikRangeColor", name = "Range Attack Color", description = "Color to highlight Verzik during range attacks", section = verzik, position = 3)
+    default Color verzikRangeColor() {
+        return new Color(144, 238, 144, 120); // Same as Yama range color
+    }
+
+    @ConfigItem(keyName = "verzikMageColor", name = "Mage Attack Color", description = "Color to highlight Verzik during mage attacks", section = verzik, position = 4)
+    default Color verzikMageColor() {
+        return new Color(100, 149, 237, 120); // Same as Yama magic color
+    }
+
+    @ConfigItem(keyName = "verzikWebColor", name = "Web Attack Color", description = "Color to highlight Verzik during web attacks", section = verzik, position = 5)
+    default Color verzikWebColor() {
+        return new Color(139, 69, 19, 120); // Brown for web attacks
+    }
+
+    @ConfigItem(keyName = "verzikYellowPoolColor", name = "Yellow Pool Color", description = "Color to highlight Verzik during yellow pool attacks", section = verzik, position = 6)
+    default Color verzikYellowPoolColor() {
+        return new Color(255, 255, 0, 120); // Yellow for pool attacks
+    }
+
+    @ConfigItem(keyName = "verzikTimerSize", name = "Timer Text Size", description = "Size of the attack timer text", section = verzik, position = 7)
+    default int verzikTimerSize() {
+        return 32;
+    }
+
+    @ConfigItem(keyName = "verzikTimerColor", name = "Timer Color", description = "Color for the attack timer", section = verzik, position = 8)
+    default Color verzikTimerColor() {
+        return new Color(255, 255, 255); // White
+    }
+
+    @ConfigItem(keyName = "verzikWarningColor", name = "Timer Warning Color", description = "Color for timer when attack is imminent", section = verzik, position = 9)
+    default Color verzikWarningColor() {
+        return new Color(255, 0, 0); // Red
     }
 
     // TODO: Add other boss config sections here when new bosses are implemented
