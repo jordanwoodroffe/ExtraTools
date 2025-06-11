@@ -98,11 +98,6 @@ public interface PvmKitsConfig extends Config {
         return true;
     }
 
-    @ConfigItem(keyName = "verzikMeleeColor", name = "Melee Attack Color", description = "Color to highlight Verzik during melee attacks", section = verzik, position = 2)
-    default Color verzikMeleeColor() {
-        return new Color(240, 100, 100, 120); // Same as Yama melee color
-    }
-
     @ConfigItem(keyName = "verzikRangeColor", name = "Range Attack Color", description = "Color to highlight Verzik during range attacks", section = verzik, position = 3)
     default Color verzikRangeColor() {
         return new Color(144, 238, 144, 120); // Same as Yama range color
@@ -111,16 +106,6 @@ public interface PvmKitsConfig extends Config {
     @ConfigItem(keyName = "verzikMageColor", name = "Mage Attack Color", description = "Color to highlight Verzik during mage attacks", section = verzik, position = 4)
     default Color verzikMageColor() {
         return new Color(100, 149, 237, 120); // Same as Yama magic color
-    }
-
-    @ConfigItem(keyName = "verzikWebColor", name = "Web Attack Color", description = "Color to highlight Verzik during web attacks", section = verzik, position = 5)
-    default Color verzikWebColor() {
-        return new Color(139, 69, 19, 120); // Brown for web attacks
-    }
-
-    @ConfigItem(keyName = "verzikYellowPoolColor", name = "Yellow Pool Color", description = "Color to highlight Verzik during yellow pool attacks", section = verzik, position = 6)
-    default Color verzikYellowPoolColor() {
-        return new Color(255, 255, 0, 120); // Yellow for pool attacks
     }
 
     @ConfigItem(keyName = "verzikTimerSize", name = "Timer Text Size", description = "Size of the attack timer text", section = verzik, position = 7)
