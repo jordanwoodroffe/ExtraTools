@@ -33,7 +33,8 @@ repositories {
     mavenCentral()
 }
 
-def runeLiteVersion = 'latest.release'
+// Pin to a specific stable version instead of using 'latest.release'
+def runeLiteVersion = '1.11.9.1'
 
 dependencies {
     // RuneLite dependencies
