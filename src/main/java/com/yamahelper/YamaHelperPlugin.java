@@ -1,40 +1,24 @@
-package com.example;
+package com.yamahelper;
 
-import net.runelite.api.Actor;
-import net.runelite.api.Client;
-import net.runelite.api.NPC;
+import com.google.inject.Provides;
+import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.*;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GraphicChanged;
-import net.runelite.api.events.GraphicsObjectCreated;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.overlay.OverlayManager;
-import net.runelite.client.ui.overlay.Overlay;
-import net.runelite.client.ui.overlay.OverlayLayer;
-import net.runelite.client.ui.overlay.OverlayPosition;
-import net.runelite.api.Perspective;
-
-import net.runelite.api.coords.LocalPoint;
-import net.runelite.api.coords.WorldPoint;
 
 import javax.inject.Inject;
-import java.awt.Dimension;
-import java.awt.Graphics2D;
 import java.awt.Color;
-import java.awt.Polygon;
-import lombok.extern.slf4j.Slf4j;
-
-import java.util.HashMap;
-import java.util.HashSet;
-
-import java.util.Map;
-import java.util.Set;
-import java.util.Iterator;
+import java.util.*;
 
 @Slf4j
-@PluginDescriptor(name = "Yama Helper", description = "Highlights Yama based on their current combat style")
-public class ExamplePlugin extends Plugin {
+@PluginDescriptor(name = "Yama Helper", description = "Highlights Yama based on their current combat style and provides attack timers", tags = {
+        "boss", "yama", "timer", "overlay", "boulder" }, enabledByDefault = false)
+public class YamaHelperPlugin extends Plugin {
 
     @Inject
     private Client client;
@@ -43,7 +27,10 @@ public class ExamplePlugin extends Plugin {
     private OverlayManager overlayManager;
 
     @Inject
-    private YamaOverlay overlay;
+    private YamaHelperConfig config;
+
+    @Inject
+    private YamaHelperOverlay overlay;
 
     // Track current Yama phases by NPC index
     private Map<Integer, YamaPhase> yamaPhases = new HashMap<>();
@@ -98,37 +85,19 @@ public class ExamplePlugin extends Plugin {
         newlyInitializedTimers.clear();
         attackCooldowns.clear();
         overlayManager.add(overlay);
+        log.info("Yama Helper plugin started!");
     }
 
     @Override
     protected void shutDown() throws Exception {
         yamaPhases.clear();
-
         lastLoggedAnimations.clear();
         yamaAttackTimers.clear();
         phaseTransitionCounts.clear();
         newlyInitializedTimers.clear();
         attackCooldowns.clear();
         overlayManager.remove(overlay);
-    }
-
-    // Static class to represent fixed tile highlights
-    static class TileHighlight {
-        private final WorldPoint worldPoint;
-        private final Color color;
-
-        public TileHighlight(WorldPoint worldPoint, Color color) {
-            this.worldPoint = worldPoint;
-            this.color = color;
-        }
-
-        public WorldPoint getWorldPoint() {
-            return worldPoint;
-        }
-
-        public Color getColor() {
-            return color;
-        }
+        log.info("Yama Helper plugin stopped!");
     }
 
     @Subscribe
@@ -155,7 +124,6 @@ public class ExamplePlugin extends Plugin {
 
                     // Reset timer to appropriate ticks when Yama attacks, but only if not in
                     // cooldown
-                    // Check for attack animation regardless of whether it changed
                     if (isAttackAnimation(animationId)) {
                         int currentTick = client.getTickCount();
                         Integer cooldownExpiry = attackCooldowns.get(index);
@@ -222,10 +190,8 @@ public class ExamplePlugin extends Plugin {
                 // Countdown the timer
                 int newTicks = currentTicks - 1;
                 yamaAttackTimers.put(yamaIndex, newTicks);
-
             } else {
                 // Timer at 1, next tick should be an attack
-
                 // Keep timer at 1 until attack is detected
             }
         }
@@ -329,6 +295,17 @@ public class ExamplePlugin extends Plugin {
         return yamaAttackTimers.getOrDefault(npcIndex, ATTACK_CYCLE_TICKS);
     }
 
+    // Get all Yama NPCs currently in the scene
+    public List<NPC> getYamaNpcs() {
+        List<NPC> yamas = new ArrayList<>();
+        for (NPC npc : client.getTopLevelWorldView().npcs()) {
+            if (npc != null && npc.getId() == YAMA_ID) {
+                yamas.add(npc);
+            }
+        }
+        return yamas;
+    }
+
     // Yama combat phases
     public enum YamaPhase {
         MAGE(new Color(100, 149, 237)), // Soft blue
@@ -349,140 +326,8 @@ public class ExamplePlugin extends Plugin {
         }
     }
 
-    static class YamaOverlay extends Overlay {
-        private final Client client;
-        private final ExamplePlugin plugin;
-        private static final int YAMA_SIZE = 5; // Yama is 5x5 tiles
-
-        @Inject
-        private YamaOverlay(Client client, ExamplePlugin plugin) {
-            super(plugin);
-            this.client = client;
-            this.plugin = plugin;
-            setPosition(OverlayPosition.DYNAMIC);
-            setLayer(OverlayLayer.ABOVE_SCENE);
-        }
-
-        @Override
-        public Dimension render(Graphics2D graphics) {
-            // First, render existing Yama highlights
-            for (NPC npc : client.getTopLevelWorldView().npcs()) {
-                if (npc == null || npc.getId() != YAMA_ID) {
-                    continue;
-                }
-
-                // Get the phase color for this Yama
-                YamaPhase phase = plugin.getYamaPhase(npc.getIndex());
-                Color tileColor = phase.getColor();
-
-                // Get base tile location of the NPC
-                LocalPoint basePoint = npc.getLocalLocation();
-                if (basePoint == null) {
-                    continue;
-                }
-
-                // Calculate the southwest corner of the 5x5 area
-                int swX = basePoint.getX() - (Perspective.LOCAL_TILE_SIZE * (YAMA_SIZE - 1) / 2);
-                int swY = basePoint.getY() - (Perspective.LOCAL_TILE_SIZE * (YAMA_SIZE - 1) / 2);
-
-                // Calculate the northeast corner of the 5x5 area
-                int neX = swX + ((YAMA_SIZE - 1) * Perspective.LOCAL_TILE_SIZE);
-                int neY = swY + ((YAMA_SIZE - 1) * Perspective.LOCAL_TILE_SIZE);
-
-                // Create LocalPoints for the four corners of the 5x5 area
-                LocalPoint swPoint = new LocalPoint(swX, swY);
-                LocalPoint sePoint = new LocalPoint(neX, swY);
-                LocalPoint nePoint = new LocalPoint(neX, neY);
-                LocalPoint nwPoint = new LocalPoint(swX, neY);
-
-                // Get the polygons for each corner tile
-                Polygon swPoly = Perspective.getCanvasTilePoly(client, swPoint);
-                Polygon sePoly = Perspective.getCanvasTilePoly(client, sePoint);
-                Polygon nePoly = Perspective.getCanvasTilePoly(client, nePoint);
-                Polygon nwPoly = Perspective.getCanvasTilePoly(client, nwPoint);
-
-                if (swPoly == null || sePoly == null || nePoly == null || nwPoly == null) {
-                    continue;
-                }
-
-                // Create a consolidated area polygon
-                Polygon borderPoly = new Polygon();
-
-                // Add the outer points of the 5x5 area to create the border
-                // South edge (SW to SE)
-                addPointsToPolygon(borderPoly, swPoly, 0, 1);
-                // East edge (SE to NE)
-                addPointsToPolygon(borderPoly, sePoly, 1, 2);
-                // North edge (NE to NW)
-                addPointsToPolygon(borderPoly, nePoly, 2, 3);
-                // West edge (NW to SW)
-                addPointsToPolygon(borderPoly, nwPoly, 3, 0);
-
-                // Fill entire 5x5 area with semi-transparent color
-                graphics.setColor(new Color(tileColor.getRed(), tileColor.getGreen(),
-                        tileColor.getBlue(), 50));
-                graphics.fill(borderPoly);
-
-                // Draw just the outer border with solid color
-                graphics.setColor(tileColor);
-                graphics.draw(borderPoly);
-
-                // Display attack timer over the center of Yama
-                int attackTimer = plugin.getYamaAttackTimer(npc.getIndex());
-                if (attackTimer > 0) {
-                    // Get center point of the NPC for text positioning
-                    LocalPoint center = npc.getLocalLocation();
-                    if (center != null) {
-                        net.runelite.api.Point textPoint = Perspective.localToCanvas(client, center, 0);
-                        if (textPoint != null) {
-                            // Set text properties - bold bright teal 48px font
-                            String timerText = String.valueOf(attackTimer);
-                            java.awt.Font font = new java.awt.Font("Arial", java.awt.Font.BOLD, 36);
-                            graphics.setFont(font);
-
-                            java.awt.FontMetrics metrics = graphics.getFontMetrics();
-                            int textWidth = metrics.stringWidth(timerText);
-                            int textHeight = metrics.getHeight();
-                            int textX = textPoint.getX() - (textWidth / 2);
-                            int textY = textPoint.getY() + (textHeight / 4); // Center vertically
-
-                            // Draw outline for visibility
-                            graphics.setColor(Color.BLACK);
-                            graphics.drawString(timerText, textX - 2, textY - 2);
-                            graphics.drawString(timerText, textX + 2, textY - 2);
-                            graphics.drawString(timerText, textX - 2, textY + 2);
-                            graphics.drawString(timerText, textX + 2, textY + 2);
-                            graphics.drawString(timerText, textX - 2, textY);
-                            graphics.drawString(timerText, textX + 2, textY);
-                            graphics.drawString(timerText, textX, textY - 2);
-                            graphics.drawString(timerText, textX, textY + 2);
-
-                            // Draw main text - bright red for '1', bright teal for others
-                            Color textColor;
-                            if (attackTimer == 1) {
-                                textColor = new Color(255, 0, 0); // Bright red for '1'
-                            } else {
-                                textColor = new Color(0, 255, 255); // Bright teal for other numbers
-                            }
-                            graphics.setColor(textColor);
-                            graphics.drawString(timerText, textX, textY);
-                        }
-                    }
-                }
-            }
-
-            return null;
-        }
-
-        // Helper method to add points from one polygon to another
-        private void addPointsToPolygon(Polygon targetPoly, Polygon sourcePoly, int startIdx, int endIdx) {
-            int sourcePoints = sourcePoly.npoints;
-            if (startIdx >= sourcePoints || endIdx >= sourcePoints) {
-                return;
-            }
-
-            targetPoly.addPoint(sourcePoly.xpoints[startIdx], sourcePoly.ypoints[startIdx]);
-            targetPoly.addPoint(sourcePoly.xpoints[endIdx], sourcePoly.ypoints[endIdx]);
-        }
+    @Provides
+    YamaHelperConfig provideConfig(ConfigManager configManager) {
+        return configManager.getConfig(YamaHelperConfig.class);
     }
 }
