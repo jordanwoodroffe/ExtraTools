@@ -5,6 +5,7 @@ import net.runelite.api.Client;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GraphicChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ProjectileMoved;
 
 /**
  * Base interface for boss-specific handlers in PVM Kits
@@ -30,6 +31,13 @@ public interface BossHandler {
      * Handle graphic changes for this boss
      */
     void onGraphicChanged(GraphicChanged event);
+
+    /**
+     * Handle projectile events for this boss
+     */
+    default void onProjectileMoved(ProjectileMoved event) {
+        // Default empty implementation for bosses that don't use projectiles
+    }
 
     /**
      * Handle game tick updates for this boss

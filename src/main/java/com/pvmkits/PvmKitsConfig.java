@@ -88,37 +88,27 @@ public interface PvmKitsConfig extends Config {
     }
 
     // Verzik Settings
-    @ConfigItem(keyName = "enableVerzik", name = "Enable Verzik", description = "Enable Verzik boss mechanics assistance", section = verzik, position = 0)
+    @ConfigItem(keyName = "enableVerzik", name = "Enable Verzik Features", description = "Enable Verzik boss mechanics assistance", section = verzik, position = 0)
     default boolean enableVerzik() {
         return true;
     }
 
-    @ConfigItem(keyName = "showVerzikTimer", name = "Show Attack Timer", description = "Display attack countdown timer", section = verzik, position = 1)
+    @ConfigItem(keyName = "showVerzikTimer", name = "Show Attack Timer", description = "Display attack countdown timer on Verzik", section = verzik, position = 1)
     default boolean showVerzikTimer() {
         return true;
     }
 
-    @ConfigItem(keyName = "verzikRangeColor", name = "Range Attack Color", description = "Color to highlight Verzik during range attacks", section = verzik, position = 3)
-    default Color verzikRangeColor() {
-        return new Color(144, 238, 144, 120); // Same as Yama range color
-    }
-
-    @ConfigItem(keyName = "verzikMageColor", name = "Mage Attack Color", description = "Color to highlight Verzik during mage attacks", section = verzik, position = 4)
-    default Color verzikMageColor() {
-        return new Color(100, 149, 237, 120); // Same as Yama magic color
-    }
-
-    @ConfigItem(keyName = "verzikTimerSize", name = "Timer Text Size", description = "Size of the attack timer text", section = verzik, position = 7)
+    @ConfigItem(keyName = "verzikTimerSize", name = "Timer Text Size", description = "Size of the attack timer text", section = verzik, position = 2)
     default int verzikTimerSize() {
         return 32;
     }
 
-    @ConfigItem(keyName = "verzikTimerColor", name = "Timer Color", description = "Color for the attack timer", section = verzik, position = 8)
+    @ConfigItem(keyName = "verzikTimerColor", name = "Timer Color", description = "Color for the attack timer", section = verzik, position = 3)
     default Color verzikTimerColor() {
         return new Color(255, 255, 255); // White
     }
 
-    @ConfigItem(keyName = "verzikWarningColor", name = "Timer Warning Color", description = "Color for timer when attack is imminent", section = verzik, position = 9)
+    @ConfigItem(keyName = "verzikWarningColor", name = "Timer Warning Color", description = "Color for timer when attack is imminent (1 tick remaining)", section = verzik, position = 4)
     default Color verzikWarningColor() {
         return new Color(255, 0, 0); // Red
     }

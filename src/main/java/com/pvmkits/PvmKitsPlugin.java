@@ -11,6 +11,7 @@ import net.runelite.api.Client;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GraphicChanged;
+import net.runelite.api.events.ProjectileMoved;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
@@ -129,6 +130,14 @@ public class PvmKitsPlugin extends Plugin {
         // Forward to active boss handler
         if (activeBossHandler != null) {
             activeBossHandler.onGraphicChanged(event);
+        }
+    }
+
+    @Subscribe
+    public void onProjectileMoved(ProjectileMoved event) {
+        // Forward to active boss handler
+        if (activeBossHandler != null) {
+            activeBossHandler.onProjectileMoved(event);
         }
     }
 

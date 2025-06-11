@@ -28,105 +28,36 @@ public class VerzikOverlay extends Overlay {
 
     @Override
     public Dimension render(Graphics2D graphics) {
+        // Check if Verzik features are enabled
         if (!config.enableVerzik()) {
             return null;
         }
 
-        NPC verzikNpc = getVerzikNpc();
-        if (verzikNpc == null) {
-            return null;
-        }
+        // Get all Verzik NPCs in the scene
+        for (NPC npc : verzikHandler.getVerzikNpcs()) {
+            if (npc == null) {
+                continue;
+            }
 
-        // Debug: Log when we find Verzik and render overlay
-        // Uncomment these lines for debugging:
-        VerzikHandler.VerzikAttackStyle attackStyle = verzikHandler.getCurrentAttackStyle();
-        boolean timerActive = verzikHandler.isTimerActive();
-        int timer = verzikHandler.getAttackTimer();
-        System.out.println("Verzik Overlay Debug - NPC: " + verzikNpc.getId() +
-                ", AttackStyle: " + attackStyle +
-                ", TimerActive: " + timerActive +
-                ", Timer: " + timer);
+            int npcIndex = npc.getIndex();
 
-        // Render attack style tile coloring (like Yama) - always show when Verzik is
-        // enabled
-        renderAttackStyleTileColoring(graphics, verzikNpc);
-
-        // Render attack timer
-        if (config.showVerzikTimer() && verzikHandler.isTimerActive()) {
-            renderAttackTimer(graphics, verzikNpc);
+            // Render attack timer if enabled
+            if (config.showVerzikTimer()) {
+                renderAttackTimer(graphics, npc, npcIndex);
+            }
         }
 
         return null;
     }
 
-    private void renderAttackStyleTileColoring(Graphics2D graphics, NPC verzikNpc) {
-        VerzikHandler.VerzikAttackStyle attackStyle = verzikHandler.getCurrentAttackStyle();
-        Color attackColor = getAttackStyleColor(attackStyle);
-
-        if (attackColor == null) {
+    private void renderAttackTimer(Graphics2D graphics, NPC npc, int npcIndex) {
+        int attackTimer = verzikHandler.getVerzikAttackTimer(npcIndex);
+        if (attackTimer <= 0) {
             return;
         }
 
-        // Get base tile location of the NPC
-        LocalPoint basePoint = verzikNpc.getLocalLocation();
-        if (basePoint == null) {
-            return;
-        }
-
-        // Use 7x7 tile size for P3 Verzik (NPC ID 8374)
-        int size = 7;
-
-        // Calculate the southwest corner of the 7x7 area (same approach as YamaOverlay)
-        int swX = basePoint.getX() - (Perspective.LOCAL_TILE_SIZE * (size - 1) / 2);
-        int swY = basePoint.getY() - (Perspective.LOCAL_TILE_SIZE * (size - 1) / 2);
-
-        // Calculate the northeast corner of the 7x7 area
-        int neX = swX + ((size - 1) * Perspective.LOCAL_TILE_SIZE);
-        int neY = swY + ((size - 1) * Perspective.LOCAL_TILE_SIZE);
-
-        // Create LocalPoints for the four corners of the 7x7 area
-        LocalPoint swPoint = new LocalPoint(swX, swY);
-        LocalPoint sePoint = new LocalPoint(neX, swY);
-        LocalPoint nePoint = new LocalPoint(neX, neY);
-        LocalPoint nwPoint = new LocalPoint(swX, neY);
-
-        // Get the polygons for each corner tile
-        Polygon swPoly = Perspective.getCanvasTilePoly(client, swPoint);
-        Polygon sePoly = Perspective.getCanvasTilePoly(client, sePoint);
-        Polygon nePoly = Perspective.getCanvasTilePoly(client, nePoint);
-        Polygon nwPoly = Perspective.getCanvasTilePoly(client, nwPoint);
-
-        if (swPoly == null || sePoly == null || nePoly == null || nwPoly == null) {
-            return;
-        }
-
-        // Create a consolidated area polygon
-        Polygon borderPoly = new Polygon();
-
-        // Add the outer points of the 7x7 area to create the border
-        addPointsToPolygon(borderPoly, swPoly, 0, 1);
-        addPointsToPolygon(borderPoly, sePoly, 1, 2);
-        addPointsToPolygon(borderPoly, nePoly, 2, 3);
-        addPointsToPolygon(borderPoly, nwPoly, 3, 0);
-
-        // Fill with attack style color
-        graphics.setColor(attackColor);
-        graphics.fill(borderPoly);
-
-        // Draw border with solid color
-        graphics.setColor(new Color(attackColor.getRed(), attackColor.getGreen(), attackColor.getBlue(), 255));
-        graphics.setStroke(new BasicStroke(2));
-        graphics.draw(borderPoly);
-    }
-
-    private void renderAttackTimer(Graphics2D graphics, NPC verzikNpc) {
-        int timer = verzikHandler.getAttackTimer();
-        if (timer <= 0) {
-            return;
-        }
-
-        // Get center point of the NPC for text positioning (same as YamaOverlay)
-        LocalPoint center = verzikNpc.getLocalLocation();
+        // Get center point of the NPC for text positioning
+        LocalPoint center = npc.getLocalLocation();
         if (center == null) {
             return;
         }
@@ -137,7 +68,7 @@ public class VerzikOverlay extends Overlay {
         }
 
         // Set text properties
-        String timerText = String.valueOf(timer);
+        String timerText = String.valueOf(attackTimer);
         Font font = new Font("Arial", Font.BOLD, config.verzikTimerSize());
         graphics.setFont(font);
 
@@ -147,7 +78,7 @@ public class VerzikOverlay extends Overlay {
         int textX = textPoint.getX() - (textWidth / 2);
         int textY = textPoint.getY() + (textHeight / 4); // Center vertically
 
-        // Draw outline for visibility (same as YamaOverlay)
+        // Draw outline for visibility
         graphics.setColor(Color.BLACK);
         graphics.drawString(timerText, textX - 2, textY - 2);
         graphics.drawString(timerText, textX + 2, textY - 2);
@@ -158,43 +89,14 @@ public class VerzikOverlay extends Overlay {
         graphics.drawString(timerText, textX, textY - 2);
         graphics.drawString(timerText, textX, textY + 2);
 
-        // Draw main text - use warning color for low timer
-        Color textColor = timer <= 2 ? config.verzikWarningColor() : config.verzikTimerColor();
+        // Draw main text - use warning color for '1', normal color for others
+        Color textColor;
+        if (attackTimer == 1) {
+            textColor = config.verzikWarningColor();
+        } else {
+            textColor = config.verzikTimerColor();
+        }
         graphics.setColor(textColor);
         graphics.drawString(timerText, textX, textY);
-    }
-
-    private NPC getVerzikNpc() {
-        for (NPC npc : client.getTopLevelWorldView().npcs()) {
-            if (npc != null && isVerzikNpc(npc.getId())) {
-                return npc;
-            }
-        }
-        return null;
-    }
-
-    private boolean isVerzikNpc(int npcId) {
-        // Only show overlay for NPC ID 8374 as requested
-        return npcId == 8374; // P3 Verzik only
-    }
-
-    private Color getAttackStyleColor(VerzikHandler.VerzikAttackStyle attackStyle) {
-        if (attackStyle == null) {
-            return new Color(128, 128, 128, 80); // Light gray for null
-        }
-
-        // Use the color from the enum directly
-        return attackStyle.getColor();
-    }
-
-    // Helper method to add points from one polygon to another (same as YamaOverlay)
-    private void addPointsToPolygon(Polygon targetPoly, Polygon sourcePoly, int startIdx, int endIdx) {
-        int sourcePoints = sourcePoly.npoints;
-        if (startIdx >= sourcePoints || endIdx >= sourcePoints) {
-            return;
-        }
-
-        targetPoly.addPoint(sourcePoly.xpoints[startIdx], sourcePoly.ypoints[startIdx]);
-        targetPoly.addPoint(sourcePoly.xpoints[endIdx], sourcePoly.ypoints[endIdx]);
     }
 }
