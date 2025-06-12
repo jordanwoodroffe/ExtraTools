@@ -78,14 +78,21 @@ public class PvmKitsPlugin extends Plugin {
 
     @Subscribe
     public void onGameTick(GameTick event) {
+        log.debug("PvmKitsPlugin.onGameTick: Called with " + bossHandlers.size() + " handlers");
+
         // Determine which boss area we're in (if any)
         BossHandler newActiveBoss = null;
         for (BossHandler handler : bossHandlers) {
+            log.debug("PvmKitsPlugin.onGameTick: Checking " + handler.getBossName() + " boss area");
             if (handler.isInBossArea(client)) {
                 newActiveBoss = handler;
+                log.debug("PvmKitsPlugin.onGameTick: Found active boss: " + handler.getBossName());
                 break; // Use first matching boss handler
             }
         }
+
+        log.debug("PvmKitsPlugin.onGameTick: Active boss = " +
+                (newActiveBoss != null ? newActiveBoss.getBossName() : "null"));
 
         // If we switched boss areas, reset the previous handler
         if (activeBossHandler != newActiveBoss) {
@@ -103,7 +110,10 @@ public class PvmKitsPlugin extends Plugin {
 
         // Forward event to active boss handler
         if (activeBossHandler != null) {
+            log.debug("PvmKitsPlugin.onGameTick: Forwarding to " + activeBossHandler.getBossName());
             activeBossHandler.onGameTick(event);
+        } else {
+            log.debug("PvmKitsPlugin.onGameTick: No active boss handler");
         }
     }
 

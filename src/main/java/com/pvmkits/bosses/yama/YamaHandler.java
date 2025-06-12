@@ -71,63 +71,35 @@ public class YamaHandler implements BossHandler {
         // Check if any Yama NPCs are present
         for (NPC npc : client.getTopLevelWorldView().npcs()) {
             if (npc != null && npc.getId() == YAMA_ID) {
+                log.info(
+                        "YamaHandler.isInBossArea: Found Yama NPC with ID " + YAMA_ID + " and index " + npc.getIndex());
                 return true;
             }
         }
+        log.debug("YamaHandler.isInBossArea: No Yama NPCs found, checking all NPCs...");
+
+        // Debug: Log all NPC IDs to help identify if Yama ID is wrong
+        int npcCount = 0;
+        for (NPC npc : client.getTopLevelWorldView().npcs()) {
+            if (npc != null) {
+                npcCount++;
+                if (npcCount <= 5) { // Only log first 5 NPCs to avoid spam
+                    log.debug("YamaHandler.isInBossArea: Found NPC ID " + npc.getId() + " at index " + npc.getIndex());
+                }
+            }
+        }
+        log.debug("YamaHandler.isInBossArea: Total NPCs found: " + npcCount);
+
         return false;
     }
 
     @Override
     public void onAnimationChanged(AnimationChanged event) {
-        Actor actor = event.getActor();
-        if (!(actor instanceof NPC)) {
-            return;
-        }
-
-        NPC npc = (NPC) actor;
-        if (npc.getId() != YAMA_ID) {
-            return;
-        }
-
-        int index = npc.getIndex();
-        int animationId = npc.getAnimation();
-
-        if (animationId != -1) {
-            Integer lastLogged = lastLoggedAnimations.get(index);
-            if (lastLogged == null || lastLogged != animationId) {
-                log.info("Yama (index " + index + ") animation: animationId=" + animationId);
-                lastLoggedAnimations.put(index, animationId);
-            }
-
-            // Reset timer to appropriate ticks when Yama attacks, but only if not in
-            // cooldown
-            if (isAttackAnimation(animationId)) {
-                int currentTick = client.getTickCount();
-                Integer cooldownExpiry = attackCooldowns.get(index);
-
-                // Only reset timer if we're not in cooldown or cooldown has expired
-                if (cooldownExpiry == null || currentTick >= cooldownExpiry) {
-                    int attackTicks = getAttackCycleTicks(index);
-                    yamaAttackTimers.put(index, attackTicks);
-                    newlyInitializedTimers.add(index);
-                    // Set cooldown to expire in 6 ticks
-                    attackCooldowns.put(index, currentTick + ATTACK_COOLDOWN_TICKS);
-                    log.info("Yama (index " + index + ") attack detected, timer reset to " + attackTicks +
-                            " (cooldown until tick " + (currentTick + ATTACK_COOLDOWN_TICKS) + ")" +
-                            (isYamaInEnragePhase(index) ? " [ENRAGE PHASE]" : ""));
-                } else {
-                    log.info("Yama (index " + index + ") attack ignored - in cooldown until tick " + cooldownExpiry);
-                }
-            }
-
-            // Update phase based on animation if available (handle melee attacks here)
-            if (animationId == ANIMATION_MELEE) {
-                yamaPhases.put(index, YamaPhase.MELEE);
-            }
-        }
+        // Animation detection moved to onGameTick to match working example
     }
 
     @Override
+    @SuppressWarnings("deprecation") // getGraphic() is deprecated but still functional
     public void onGraphicChanged(GraphicChanged event) {
         Actor actor = event.getActor();
 
@@ -141,7 +113,7 @@ public class YamaHandler implements BossHandler {
         }
 
         int index = npc.getIndex();
-        int graphicId = actor.getGraphic();
+        int graphicId = npc.getGraphic();
 
         // Log every graphic change event, including when graphics are cleared
         log.info("Yama (index " + index + ") attack graphic: graphicId=" + graphicId);
@@ -191,16 +163,58 @@ public class YamaHandler implements BossHandler {
             return;
         }
 
+        log.debug("YamaHandler.onGameTick: Called, GameState=" + client.getGameState());
+
         boolean yamaPresent = false;
         // Track all visible Yamas in the scene
         for (NPC npc : client.getTopLevelWorldView().npcs()) {
             if (npc != null && npc.getId() == YAMA_ID) {
                 yamaPresent = true;
                 int index = npc.getIndex();
+                log.debug("YamaHandler.onGameTick: Processing Yama with index " + index);
+
+                // Log animation IDs for Yama only when they change
+                int animationId = npc.getAnimation();
+                if (animationId != -1) {
+                    Integer lastLogged = lastLoggedAnimations.get(index);
+                    if (lastLogged == null || lastLogged != animationId) {
+                        log.info("Yama (index " + index + ") animation: animationId=" + animationId);
+                        lastLoggedAnimations.put(index, animationId);
+                    }
+
+                    // Reset timer to appropriate ticks when Yama attacks, but only if not in
+                    // cooldown
+                    // Check for attack animation regardless of whether it changed
+                    if (isAttackAnimation(animationId)) {
+                        int currentTick = client.getTickCount();
+                        Integer cooldownExpiry = attackCooldowns.get(index);
+
+                        // Only reset timer if we're not in cooldown or cooldown has expired
+                        if (cooldownExpiry == null || currentTick >= cooldownExpiry) {
+                            int attackTicks = getAttackCycleTicks(index);
+                            yamaAttackTimers.put(index, attackTicks);
+                            newlyInitializedTimers.add(index);
+                            // Set cooldown to expire in 6 ticks
+                            attackCooldowns.put(index, currentTick + ATTACK_COOLDOWN_TICKS);
+                            log.info("Yama (index " + index + ") attack detected, timer reset to " + attackTicks +
+                                    " (cooldown until tick " + (currentTick + ATTACK_COOLDOWN_TICKS) + ")" +
+                                    (isYamaInEnragePhase(index) ? " [ENRAGE PHASE]" : ""));
+                        } else {
+                            log.debug("Yama (index " + index + ") attack ignored - in cooldown until tick "
+                                    + cooldownExpiry);
+                        }
+                    }
+
+                    // Update phase based on animation if available (handle melee attacks here)
+                    if (animationId == ANIMATION_MELEE) {
+                        yamaPhases.put(index, YamaPhase.MELEE);
+                    }
+                }
 
                 // Initialize with UNKNOWN if we haven't seen this Yama before
                 if (!yamaPhases.containsKey(index)) {
                     yamaPhases.put(index, YamaPhase.UNKNOWN);
+                    log.info("YamaHandler.onGameTick: Initialized phase to UNKNOWN for Yama index " + index);
                 }
 
                 // Initialize timer if not present (start with appropriate timing)
@@ -210,23 +224,37 @@ public class YamaHandler implements BossHandler {
                     newlyInitializedTimers.add(index);
                     log.info("Yama (index " + index + ") timer initialized to " + attackTicks +
                             (isYamaInEnragePhase(index) ? " [ENRAGE PHASE]" : ""));
+                } else {
+                    // Debug: Log current timer state every 10 ticks to avoid spam
+                    if (client.getTickCount() % 10 == 0) {
+                        int currentTimer = yamaAttackTimers.get(index);
+                        log.debug("Yama (index " + index + ") current timer value: " + currentTimer);
+                    }
                 }
             }
         }
 
         // If no Yama exists, clear all highlights and phases
         if (!yamaPresent) {
-            reset();
+            if (!yamaPhases.isEmpty() || !yamaAttackTimers.isEmpty()) {
+                log.info("YamaHandler.onGameTick: No Yama present, clearing all data");
+            }
+            yamaPhases.clear();
+            yamaAttackTimers.clear();
+            phaseTransitionCounts.clear();
+            attackCooldowns.clear();
             return;
         }
 
         // Update attack timers for all Yamas
+        log.debug("YamaHandler.onGameTick: Updating timers for " + yamaAttackTimers.size() + " Yamas");
         for (Map.Entry<Integer, Integer> entry : yamaAttackTimers.entrySet()) {
             int yamaIndex = entry.getKey();
             int currentTicks = entry.getValue();
 
             // Skip countdown for newly initialized timers this tick
             if (newlyInitializedTimers.contains(yamaIndex)) {
+                log.debug("Yama (index " + yamaIndex + ") timer skip countdown (newly initialized): " + currentTicks);
                 continue;
             }
 
@@ -235,13 +263,24 @@ public class YamaHandler implements BossHandler {
                 // Countdown the timer
                 int newTicks = currentTicks - 1;
                 yamaAttackTimers.put(yamaIndex, newTicks);
-            } else {
+                log.debug("Yama (index " + yamaIndex + ") timer countdown: " + currentTicks + " -> " + newTicks);
+
+            } else if (currentTicks == 1) {
                 // Timer at 1, next tick should be an attack
+                log.debug("Yama (index " + yamaIndex + ") timer at 1, waiting for attack");
                 // Keep timer at 1 until attack is detected
+            } else if (currentTicks <= 0) {
+                // Timer went below 1, reset it
+                int attackTicks = getAttackCycleTicks(yamaIndex);
+                yamaAttackTimers.put(yamaIndex, attackTicks);
+                log.info("Yama (index " + yamaIndex + ") timer reset from " + currentTicks + " to " + attackTicks);
             }
         }
 
         // Clear the newly initialized timers set for next tick
+        if (!newlyInitializedTimers.isEmpty()) {
+            log.debug("YamaHandler.onGameTick: Clearing newly initialized timers: " + newlyInitializedTimers);
+        }
         newlyInitializedTimers.clear();
     }
 
