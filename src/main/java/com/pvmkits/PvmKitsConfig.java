@@ -12,8 +12,8 @@ public interface PvmKitsConfig extends Config {
     @ConfigSection(name = "Yama", description = "Yama boss mechanics assistance", position = 1)
     String yama = "yama";
 
-    @ConfigSection(name = "Verzik", description = "Verzik boss mechanics assistance", position = 2)
-    String verzik = "verzik";
+    @ConfigSection(name = "Phosani's Nightmare", description = "Phosani's Nightmare boss mechanics assistance", position = 2)
+    String phosani = "phosani";
 
     // General Settings
     @ConfigItem(keyName = "showDebugInfo", name = "Show Debug Info", description = "Display debug information in chat", section = general, position = 0)
@@ -87,30 +87,55 @@ public interface PvmKitsConfig extends Config {
         return false;
     }
 
-    // Verzik Settings
-    @ConfigItem(keyName = "enableVerzik", name = "Enable Verzik Features", description = "Enable Verzik boss mechanics assistance", section = verzik, position = 0)
-    default boolean enableVerzik() {
+    // Phosani's Nightmare Settings
+    @ConfigItem(keyName = "highlightPhosani", name = "Highlight Phosani", description = "Highlight Phosani's Nightmare based on their combat phase", section = phosani, position = 0)
+    default boolean highlightPhosani() {
         return true;
     }
 
-    @ConfigItem(keyName = "showVerzikTimer", name = "Show Attack Timer", description = "Display attack countdown timer on Verzik", section = verzik, position = 1)
-    default boolean showVerzikTimer() {
+    @ConfigItem(keyName = "phosaniMeleeColor", name = "Melee Phase Color", description = "Color to highlight Phosani during melee phase", section = phosani, position = 1)
+    default Color phosaniMeleeColor() {
+        return new Color(240, 100, 100, 120); // Soft red
+    }
+
+    @ConfigItem(keyName = "phosaniRangedColor", name = "Ranged Phase Color", description = "Color to highlight Phosani during ranged phase", section = phosani, position = 2)
+    default Color phosaniRangedColor() {
+        return new Color(144, 238, 144); // Soft green
+    }
+
+    @ConfigItem(keyName = "phosaniMagicColor", name = "Magic Phase Color", description = "Color to highlight Phosani during magic phase", section = phosani, position = 3)
+    default Color phosaniMagicColor() {
+        return new Color(100, 149, 237); // Soft blue
+    }
+
+    @ConfigItem(keyName = "phosaniSpecialColor", name = "Special Attack Color", description = "Color to highlight Phosani during special attacks", section = phosani, position = 4)
+    default Color phosaniSpecialColor() {
+        return new Color(255, 165, 0, 100); // Orange
+    }
+
+    @ConfigItem(keyName = "showPhosaniAttackTimers", name = "Show Attack Timers", description = "Display attack countdown timers on Phosani's Nightmare", section = phosani, position = 5)
+    default boolean showPhosaniAttackTimers() {
         return true;
     }
 
-    @ConfigItem(keyName = "verzikTimerSize", name = "Timer Text Size", description = "Size of the attack timer text", section = verzik, position = 2)
-    default int verzikTimerSize() {
-        return 32;
+    @ConfigItem(keyName = "phosaniTimerTextSize", name = "Timer Text Size", description = "Size of the attack timer text", section = phosani, position = 6)
+    default int phosaniTimerTextSize() {
+        return 36;
     }
 
-    @ConfigItem(keyName = "verzikTimerColor", name = "Timer Color", description = "Color for the attack timer", section = verzik, position = 3)
-    default Color verzikTimerColor() {
-        return new Color(255, 255, 255); // White
+    @ConfigItem(keyName = "phosaniWarningColor", name = "Warning Color", description = "Color for timer when attack is imminent (1 tick remaining)", section = phosani, position = 7)
+    default Color phosaniWarningColor() {
+        return new Color(255, 0, 0); // Bright red
     }
 
-    @ConfigItem(keyName = "verzikWarningColor", name = "Timer Warning Color", description = "Color for timer when attack is imminent (1 tick remaining)", section = verzik, position = 4)
-    default Color verzikWarningColor() {
-        return new Color(255, 0, 0); // Red
+    @ConfigItem(keyName = "phosaniNormalTimerColor", name = "Normal Timer Color", description = "Color for timer during normal countdown", section = phosani, position = 8)
+    default Color phosaniNormalTimerColor() {
+        return new Color(0, 255, 255); // Bright teal
+    }
+
+    @ConfigItem(keyName = "phosaniTransparency", name = "Highlight Transparency", description = "Transparency level for Phosani area highlighting (0-255)", section = phosani, position = 9)
+    default int phosaniTransparency() {
+        return 50;
     }
 
     // TODO: Add other boss config sections here when new bosses are implemented

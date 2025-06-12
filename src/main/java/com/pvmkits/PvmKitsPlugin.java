@@ -3,6 +3,8 @@ package com.pvmkits;
 import com.google.inject.Provides;
 import com.pvmkits.bosses.yama.YamaHandler;
 import com.pvmkits.bosses.yama.YamaOverlay;
+import com.pvmkits.bosses.phosani.PhosaniHandler;
+import com.pvmkits.bosses.phosani.PhosaniOverlay;
 
 import com.pvmkits.core.BossHandler;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +25,8 @@ import java.util.List;
 
 @Slf4j
 @PluginDescriptor(name = "PVM Kits", description = "Multi-boss PVM assistance toolkit with mechanics overlays and timers", tags = {
-        "combat", "boss", "pvm", "mechanics", "yama", "verzik", "tob" }, enabledByDefault = false)
+        "combat", "boss", "pvm", "mechanics", "yama", "phosani", "nightmare", "verzik",
+        "tob" }, enabledByDefault = false)
 public class PvmKitsPlugin extends Plugin {
 
     @Inject
@@ -41,6 +44,12 @@ public class PvmKitsPlugin extends Plugin {
     @Inject
     private YamaOverlay yamaOverlay;
 
+    @Inject
+    private PhosaniHandler phosaniHandler;
+
+    @Inject
+    private PhosaniOverlay phosaniOverlay;
+
     // List of all boss handlers - Yama, Verzik...
     private List<BossHandler> bossHandlers;
 
@@ -52,6 +61,7 @@ public class PvmKitsPlugin extends Plugin {
         // Initialize boss handlers list
         bossHandlers = new ArrayList<>();
         bossHandlers.add(yamaHandler);
+        bossHandlers.add(phosaniHandler);
 
         // TODO: Add other boss handlers here when implemented
         // bossHandlers.add(nyloHandler);
@@ -59,6 +69,7 @@ public class PvmKitsPlugin extends Plugin {
 
         activeBossHandler = null;
         overlayManager.add(yamaOverlay);
+        overlayManager.add(phosaniOverlay);
 
         log.info("PVM Kits plugin started!");
     }
@@ -72,6 +83,7 @@ public class PvmKitsPlugin extends Plugin {
 
         activeBossHandler = null;
         overlayManager.remove(yamaOverlay);
+        overlayManager.remove(phosaniOverlay);
 
         log.info("PVM Kits plugin stopped!");
     }
@@ -148,6 +160,10 @@ public class PvmKitsPlugin extends Plugin {
 
     public YamaHandler getYamaHandler() {
         return yamaHandler;
+    }
+
+    public PhosaniHandler getPhosaniHandler() {
+        return phosaniHandler;
     }
 
     @Provides

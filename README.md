@@ -11,14 +11,22 @@ Multi-boss PVM assistance toolkit with mechanics overlays and timers for Old Sch
 - **Visual Features**: 5x5 tile area highlighting, configurable phase colors
 - **Configuration**: Full customization in "Yama" tab
 
-### 2. Verzik (Normal Mode ToB)
+### 2. Phosani's Nightmare
+- **Phase Detection**: Melee, Range, Magic, Special attacks
+- **Attack Timing**: 8-tick normal attacks, 6-tick enrage phase (≤25% HP)
+- **Enrage Detection**: Automatic detection via HP percentage monitoring
+- **Visual Features**: 5x5 tile area highlighting, configurable phase colors
+- **NPC Support**: All Phosani variants (IDs: 9416-9424, 11153-11155, 377)
+- **Configuration**: Full customization in "Phosani's Nightmare" tab
+
+### 3. Verzik (Normal Mode ToB)
 - **Phase Detection**: P1 Dawnbringer/Pillars (14 ticks), P2 Flying/Lightning (4 ticks), P3 Spider Hybrid (7 ticks, 5 when enraged at 20% HP)
 - **Attack Styles**: Web Throw, Melee, Range, Mage, Yellow Pool
 - **Attack Timing**: P1: 14 ticks (hide behind pillars), P2: 4 ticks (step back), P3: 7 ticks (5 when enraged)
 - **Visual Features**: Tile coloring based on attack style (like Yama), attack timers
 - **Configuration**: Attack style colors match Yama colors, timer settings in "Verzik" tab
 
-### 3. Sotetseg (Normal Mode ToB)
+### 4. Sotetseg (Normal Mode ToB)
 - **Phase Detection**: Overworld, Shadow Realm
 - **Attack Styles**: Melee, Mage, Range, Death Ball, Shadow Teleport
 - **Attack Timing**: 4-tick cycle for both phases
@@ -48,7 +56,8 @@ The plugin provides separate configuration tabs for each boss:
 
 - **General**: Debug information and global settings
 - **Yama**: All Yama-specific overlays and colors
-- **Verzik**: All Verzik-specific overlays and colors  
+- **Phosani's Nightmare**: All Phosani-specific overlays and colors
+- **Verzik**: All Verzik-specific overlays and colors
 - **Sotetseg**: All Sotetseg-specific overlays and colors
 
 ## Technical Details
@@ -71,4 +80,4 @@ To add a new boss:
 
 ## Tags
 
-`combat`, `boss`, `pvm`, `mechanics`, `yama`, `verzik`, `sotetseg`, `tob`
+`combat`, `boss`, `pvm`, `mechanics`, `yama`, `phosani`, `nightmare`, `verzik`, `sotetseg`, `tob`
