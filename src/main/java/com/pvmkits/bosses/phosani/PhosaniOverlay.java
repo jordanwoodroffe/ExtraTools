@@ -164,11 +164,11 @@ public class PhosaniOverlay extends Overlay {
                     Rectangle tileRect = baseTilePoly.getBounds();
                     int centerX = tileRect.x + tileRect.width / 2;
                     // Position timer below the base tile center (at feet level)
-                    int stableY = tileRect.y + tileRect.height + 10; // Fixed 10px below base tile (slightly higher)
+                    int stableY = tileRect.y + tileRect.height;
 
                     // Set text properties - make text bigger
                     String timerText = String.valueOf(attackTimer);
-                    int fontSize = Math.max(24, config.phosaniTimerTextSize() + 8); // Minimum 24px, +8 from config
+                    int fontSize = Math.max(20, config.phosaniTimerTextSize() + 8); // Minimum 24px, +8 from config
                     java.awt.Font font = new java.awt.Font("Arial", java.awt.Font.BOLD, fontSize);
                     graphics.setFont(font);
 
