@@ -13,8 +13,9 @@ Multi-boss PVM assistance toolkit with mechanics overlays and timers for Old Sch
 
 ### 2. Phosani's Nightmare
 - **Phase Detection**: Melee, Range, Magic, Special attacks
-- **Attack Timing**: 8-tick normal attacks, 6-tick enrage phase (≤25% HP)
-- **Enrage Detection**: Automatic detection via HP percentage monitoring
+- **Attack Timing**: Consistent 6-tick attack cycle throughout fight
+- **Curse Support**: Prayer shuffling detection with visual indicators (5-attack duration)
+- **Smart Overlay**: Shows correct prayer to click during curse (accounts for shuffling)
 - **Visual Features**: 5x5 tile area highlighting, configurable phase colors
 - **NPC Support**: All Phosani variants (IDs: 9416-9424, 11153-11155, 377)
 - **Configuration**: Full customization in "Phosani's Nightmare" tab

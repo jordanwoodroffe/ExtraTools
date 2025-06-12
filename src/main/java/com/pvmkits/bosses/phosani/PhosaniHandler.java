@@ -3,9 +3,12 @@ package com.pvmkits.bosses.phosani;
 import com.pvmkits.core.BossHandler;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GraphicChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.GameObjectSpawned;
+import net.runelite.api.events.GameObjectDespawned;
 
 import javax.inject.Inject;
 import java.awt.Color;
@@ -24,11 +27,16 @@ public class PhosaniHandler implements BossHandler {
     private static final Set<Integer> PHOSANI_IDS = Set.of(9416, 9417, 9418, 9419, 9420, 9421, 9422, 9423, 9424, 11153,
             11154, 11155, 377);
 
+    // Spore danger zone tracking
+    private static final int SPORE_GAME_OBJECT_ID = 37739;
+    private Set<WorldPoint> sporeDangerZones = new HashSet<>();
+
     // Phosani animation IDs (these will need to be determined through testing)
     private static final int ANIMATION_MELEE = 8594; // Placeholder - needs verification
     private static final int ANIMATION_MAGE = 8595; // Placeholder - needs verification
     private static final int ANIMATION_RANGE = 8596; // Placeholder - needs verification
     private static final int ANIMATION_SPECIAL = 8597; // Placeholder - needs verification
+    private static final int ANIMATION_CURSE = 8599; // Curse special attack
 
     // Phosani graphic IDs (these will need to be determined through testing)
     private static final int GRAPHIC_MAGE = 1767; // Placeholder - needs verification
@@ -36,8 +44,7 @@ public class PhosaniHandler implements BossHandler {
     private static final int GRAPHIC_SPECIAL = 1769; // Placeholder - needs verification
 
     // Attack cycle constants
-    private static final int ATTACK_CYCLE_TICKS = 8;
-    private static final int ENRAGE_ATTACK_CYCLE_TICKS = 6; // Faster attacks when low HP
+    private static final int ATTACK_CYCLE_TICKS = 6; // Consistent 6-tick cycle throughout fight
 
     // Track last logged animation for each Phosani to prevent duplicate logging
     private Map<Integer, Integer> lastLoggedAnimations = new HashMap<>();
@@ -57,8 +64,11 @@ public class PhosaniHandler implements BossHandler {
     // Cooldown duration in ticks after detecting an attack
     private static final int ATTACK_COOLDOWN_TICKS = 6;
 
-    // Track HP percentages to determine enrage phase
-    private Map<Integer, Integer> phosaniHpPercentages = new HashMap<>();
+    // Track curse state for each Phosani (NPC index -> remaining curse attacks)
+    private Map<Integer, Integer> phosaniCurseAttacks = new HashMap<>();
+
+    // Curse duration constants
+    private static final int CURSE_DURATION_ATTACKS = 5;
 
     @Override
     public String getBossName() {
@@ -132,8 +142,7 @@ public class PhosaniHandler implements BossHandler {
                 // Set cooldown to expire in 6 ticks
                 attackCooldowns.put(index, currentTick + ATTACK_COOLDOWN_TICKS);
                 log.info("Phosani (index " + index + ") graphic attack detected, timer reset to " + attackTicks +
-                        " (cooldown until tick " + (currentTick + ATTACK_COOLDOWN_TICKS) + ")" +
-                        (isPhosaniInEnragePhase(index) ? " [ENRAGE PHASE]" : ""));
+                        " (cooldown until tick " + (currentTick + ATTACK_COOLDOWN_TICKS) + ")");
             } else {
                 log.info("Phosani (index " + index + ") graphic attack ignored - in cooldown until tick "
                         + cooldownExpiry);
@@ -166,12 +175,6 @@ public class PhosaniHandler implements BossHandler {
                 int index = npc.getIndex();
                 log.debug("PhosaniHandler.onGameTick: Processing Phosani with index " + index);
 
-                // Update HP percentage for enrage detection
-                if (npc.getHealthRatio() != -1) {
-                    int hpPercentage = (npc.getHealthRatio() * 100) / npc.getHealthScale();
-                    phosaniHpPercentages.put(index, hpPercentage);
-                }
-
                 // Log animation IDs for Phosani only when they change
                 int animationId = npc.getAnimation();
                 if (animationId != -1) {
@@ -194,12 +197,31 @@ public class PhosaniHandler implements BossHandler {
                             // Set cooldown to expire in 6 ticks
                             attackCooldowns.put(index, currentTick + ATTACK_COOLDOWN_TICKS);
                             log.info("Phosani (index " + index + ") attack detected, timer reset to " + attackTicks +
-                                    " (cooldown until tick " + (currentTick + ATTACK_COOLDOWN_TICKS) + ")" +
-                                    (isPhosaniInEnragePhase(index) ? " [ENRAGE PHASE]" : ""));
+                                    " (cooldown until tick " + (currentTick + ATTACK_COOLDOWN_TICKS) + ")");
+
+                            // Decrement curse counter if active
+                            if (isPhosaniCursed(index)) {
+                                int remainingCurseAttacks = phosaniCurseAttacks.get(index) - 1;
+                                if (remainingCurseAttacks <= 0) {
+                                    phosaniCurseAttacks.remove(index);
+                                    log.info("Phosani (index " + index + ") curse has ended");
+                                } else {
+                                    phosaniCurseAttacks.put(index, remainingCurseAttacks);
+                                    log.info("Phosani (index " + index + ") curse: " + remainingCurseAttacks
+                                            + " attacks remaining");
+                                }
+                            }
                         } else {
                             log.debug("Phosani (index " + index + ") attack ignored - in cooldown until tick "
                                     + cooldownExpiry);
                         }
+                    }
+
+                    // Check for curse animation
+                    if (animationId == ANIMATION_CURSE) {
+                        phosaniCurseAttacks.put(index, CURSE_DURATION_ATTACKS);
+                        log.info("Phosani (index " + index + ") curse activated! Duration: " + CURSE_DURATION_ATTACKS
+                                + " attacks");
                     }
 
                     // Update phase based on animation if available
@@ -225,8 +247,7 @@ public class PhosaniHandler implements BossHandler {
                     int attackTicks = getAttackCycleTicks(index);
                     phosaniAttackTimers.put(index, attackTicks);
                     newlyInitializedTimers.add(index);
-                    log.info("Phosani (index " + index + ") timer initialized to " + attackTicks +
-                            (isPhosaniInEnragePhase(index) ? " [ENRAGE PHASE]" : ""));
+                    log.info("Phosani (index " + index + ") timer initialized to " + attackTicks);
                 } else {
                     // Debug: Log current timer state every 10 ticks to avoid spam
                     if (client.getTickCount() % 10 == 0) {
@@ -244,8 +265,8 @@ public class PhosaniHandler implements BossHandler {
             }
             phosaniPhases.clear();
             phosaniAttackTimers.clear();
-            phosaniHpPercentages.clear();
             attackCooldowns.clear();
+            phosaniCurseAttacks.clear();
             return;
         }
 
@@ -303,18 +324,39 @@ public class PhosaniHandler implements BossHandler {
     public void reset() {
         phosaniPhases.clear();
         phosaniAttackTimers.clear();
-        phosaniHpPercentages.clear();
         attackCooldowns.clear();
         lastLoggedAnimations.clear();
         newlyInitializedTimers.clear();
+        phosaniCurseAttacks.clear();
+        sporeDangerZones.clear();
+    }
+
+    // Handle spore danger zone creation
+    public void onGameObjectSpawned(GameObjectSpawned event) {
+        GameObject gameObject = event.getGameObject();
+        if (gameObject.getId() == SPORE_GAME_OBJECT_ID) {
+            WorldPoint location = gameObject.getWorldLocation();
+            sporeDangerZones.add(location);
+            log.info("Spore danger zone activated at " + location);
+        }
+    }
+
+    // Handle spore danger zone removal
+    public void onGameObjectDespawned(GameObjectDespawned event) {
+        GameObject gameObject = event.getGameObject();
+        if (gameObject.getId() == SPORE_GAME_OBJECT_ID) {
+            WorldPoint location = gameObject.getWorldLocation();
+            sporeDangerZones.remove(location);
+            log.info("Spore danger zone deactivated at " + location);
+        }
     }
 
     // Helper methods
     private boolean isAttackAnimation(int animationId) {
         return animationId == ANIMATION_MELEE ||
                 animationId == ANIMATION_MAGE ||
-                animationId == ANIMATION_RANGE ||
-                animationId == ANIMATION_SPECIAL;
+                animationId == ANIMATION_RANGE;
+        // ANIMATION_SPECIAL (8597) is NOT counted as an attack
     }
 
     private boolean isAttackGraphic(int graphicId) {
@@ -324,16 +366,66 @@ public class PhosaniHandler implements BossHandler {
     }
 
     public boolean isPhosaniInEnragePhase(int npcIndex) {
-        Integer hpPercentage = phosaniHpPercentages.get(npcIndex);
-        return hpPercentage != null && hpPercentage <= 25; // Enrage at 25% HP
+        return false; // Phosani has no enrage phase - consistent 6-tick cycle throughout
+    }
+
+    public boolean isPhosaniCursed(int npcIndex) {
+        return phosaniCurseAttacks.containsKey(npcIndex);
+    }
+
+    public int getPhosaniCurseAttacksRemaining(int npcIndex) {
+        return phosaniCurseAttacks.getOrDefault(npcIndex, 0);
     }
 
     private int getAttackCycleTicks(int npcIndex) {
-        return isPhosaniInEnragePhase(npcIndex) ? ENRAGE_ATTACK_CYCLE_TICKS : ATTACK_CYCLE_TICKS;
+        return ATTACK_CYCLE_TICKS; // Always 6 ticks - no enrage phase
     }
 
     public PhosaniPhase getPhosaniPhase(int npcIndex) {
         return phosaniPhases.getOrDefault(npcIndex, PhosaniPhase.UNKNOWN);
+    }
+
+    /**
+     * Get the effective phase for overlay display, accounting for curse prayer
+     * shuffling.
+     * During curse, prayers are shuffled to the left:
+     * - Protect from Magic activates Protect from Missiles (Range)
+     * - Protect from Missiles activates Protect from Melee
+     * - Protect from Melee activates Protect from Magic
+     * 
+     * The overlay should show the prayer the player should CLICK to get the correct
+     * protection.
+     * Since the shuffling happens after clicking, we show the same color as the
+     * attack type.
+     */
+    public PhosaniPhase getEffectivePhase(int npcIndex) {
+        PhosaniPhase actualPhase = getPhosaniPhase(npcIndex);
+
+        // If not cursed, return normal phase
+        if (!isPhosaniCursed(npcIndex)) {
+            return actualPhase;
+        }
+
+        // During curse, show the prayer button to click to get the needed protection
+        switch (actualPhase) {
+            case MAGE:
+                // Magic attack -> need Magic protection -> click Melee (because Melee activates
+                // Magic)
+                return PhosaniPhase.MELEE;
+            case RANGE:
+                // Range attack -> need Range protection -> click Magic (because Magic activates
+                // Range)
+                return PhosaniPhase.MAGE;
+            case MELEE:
+                // Melee attack -> need Melee protection -> click Range (because Range activates
+                // Melee)
+                return PhosaniPhase.RANGE;
+            case SPECIAL:
+            case UNKNOWN:
+            default:
+                // For special attacks or unknown, keep the same
+                return actualPhase;
+        }
     }
 
     public int getPhosaniAttackTimer(int npcIndex) {
@@ -348,6 +440,10 @@ public class PhosaniHandler implements BossHandler {
             }
         }
         return phosanis;
+    }
+
+    public Set<WorldPoint> getSporeDangerZones() {
+        return new HashSet<>(sporeDangerZones);
     }
 
     // Phosani combat phases

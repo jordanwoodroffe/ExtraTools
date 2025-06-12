@@ -138,6 +138,16 @@ public interface PvmKitsConfig extends Config {
         return 50;
     }
 
+    @ConfigItem(keyName = "highlightSporeDangerZones", name = "Highlight Spore Danger Zones", description = "Show red borders around dangerous 3x3 spore areas", section = phosani, position = 11)
+    default boolean highlightSporeDangerZones() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightSleepwalkers", name = "Highlight Sleepwalkers & Husks", description = "Highlight sleepwalkers and husks in soft red", section = phosani, position = 12)
+    default boolean highlightSleepwalkers() {
+        return true;
+    }
+
     // TODO: Add other boss config sections here when new bosses are implemented
     // Example:
     // @ConfigSection(name = "Verzik Settings", description = "Verzik boss

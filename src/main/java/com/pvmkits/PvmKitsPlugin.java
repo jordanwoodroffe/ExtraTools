@@ -13,6 +13,8 @@ import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GraphicChanged;
 import net.runelite.api.events.ProjectileMoved;
+import net.runelite.api.events.GameObjectSpawned;
+import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
@@ -150,6 +152,22 @@ public class PvmKitsPlugin extends Plugin {
         // Forward to active boss handler
         if (activeBossHandler != null) {
             activeBossHandler.onProjectileMoved(event);
+        }
+    }
+
+    @Subscribe
+    public void onGameObjectSpawned(GameObjectSpawned event) {
+        // Forward to Phosani handler specifically for spore tracking
+        if (phosaniHandler != null) {
+            phosaniHandler.onGameObjectSpawned(event);
+        }
+    }
+
+    @Subscribe
+    public void onGameObjectDespawned(GameObjectDespawned event) {
+        // Forward to Phosani handler specifically for spore tracking
+        if (phosaniHandler != null) {
+            phosaniHandler.onGameObjectDespawned(event);
         }
     }
 

@@ -6,7 +6,7 @@
 - **Location**: `/src/main/java/com/pvmkits/bosses/phosani/PhosaniHandler.java`
 - **Features**:
   - Supports all Phosani NPC IDs (9416-9424, 11153-11155, 377)
-  - Attack timer with 8-tick normal and 6-tick enrage cycles
+  - Attack timer with consistent 6-tick cycle throughout fight
   - Phase detection (Melee, Magic, Range, Special, Unknown)
   - HP-based enrage detection (≤25% HP)
   - Cooldown system to prevent duplicate timer resets
