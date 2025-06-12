@@ -164,7 +164,7 @@ public class PhosaniOverlay extends Overlay {
                     Rectangle tileRect = baseTilePoly.getBounds();
                     int centerX = tileRect.x + tileRect.width / 2;
                     // Position timer below the base tile center (at feet level)
-                    int stableY = tileRect.y + tileRect.height + 20; // Fixed 20px below base tile
+                    int stableY = tileRect.y + tileRect.height + 10; // Fixed 10px below base tile (slightly higher)
 
                     // Set text properties - make text bigger
                     String timerText = String.valueOf(attackTimer);
@@ -262,7 +262,11 @@ public class PhosaniOverlay extends Overlay {
         // West edge (NW to SW)
         addPointsToPolygon(borderPoly, nwPoly, 3, 0);
 
-        // Draw only the border with soft red color (no fill)
+        // Fill the 3x3 area with soft red semi-transparent color
+        graphics.setColor(new Color(255, 0, 0, 80)); // Soft red fill with low opacity
+        graphics.fill(borderPoly);
+
+        // Draw only the border with soft red color (more opaque)
         graphics.setColor(new Color(255, 0, 0, 180)); // Soft red with transparency
         graphics.setStroke(new BasicStroke(3)); // Make border thicker for visibility
         graphics.draw(borderPoly);

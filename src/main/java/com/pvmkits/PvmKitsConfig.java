@@ -6,13 +6,13 @@ import java.awt.Color;
 @ConfigGroup("pvmkits")
 public interface PvmKitsConfig extends Config {
 
-    @ConfigSection(name = "General", description = "General PVM Kits settings", position = 0)
+    @ConfigSection(name = "General", description = "General PVM Kits settings", position = 0, closedByDefault = true)
     String general = "general";
 
-    @ConfigSection(name = "Yama", description = "Yama boss mechanics assistance", position = 1)
+    @ConfigSection(name = "Yama", description = "Yama boss mechanics assistance", position = 1, closedByDefault = true)
     String yama = "yama";
 
-    @ConfigSection(name = "Phosani's Nightmare", description = "Phosani's Nightmare boss mechanics assistance", position = 2)
+    @ConfigSection(name = "Phosani's Nightmare", description = "Phosani's Nightmare boss mechanics assistance", position = 2, closedByDefault = true)
     String phosani = "phosani";
 
     // General Settings
