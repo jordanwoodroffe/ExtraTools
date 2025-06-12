@@ -3,8 +3,7 @@ package com.pvmkits;
 import com.google.inject.Provides;
 import com.pvmkits.bosses.yama.YamaHandler;
 import com.pvmkits.bosses.yama.YamaOverlay;
-import com.pvmkits.bosses.verzik.VerzikHandler;
-import com.pvmkits.bosses.verzik.VerzikOverlay;
+
 import com.pvmkits.core.BossHandler;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
@@ -42,12 +41,6 @@ public class PvmKitsPlugin extends Plugin {
     @Inject
     private YamaOverlay yamaOverlay;
 
-    @Inject
-    private VerzikHandler verzikHandler;
-
-    @Inject
-    private VerzikOverlay verzikOverlay;
-
     // List of all boss handlers - Yama, Verzik...
     private List<BossHandler> bossHandlers;
 
@@ -59,7 +52,6 @@ public class PvmKitsPlugin extends Plugin {
         // Initialize boss handlers list
         bossHandlers = new ArrayList<>();
         bossHandlers.add(yamaHandler);
-        bossHandlers.add(verzikHandler);
 
         // TODO: Add other boss handlers here when implemented
         // bossHandlers.add(nyloHandler);
@@ -67,7 +59,6 @@ public class PvmKitsPlugin extends Plugin {
 
         activeBossHandler = null;
         overlayManager.add(yamaOverlay);
-        overlayManager.add(verzikOverlay);
 
         log.info("PVM Kits plugin started!");
     }
@@ -81,7 +72,6 @@ public class PvmKitsPlugin extends Plugin {
 
         activeBossHandler = null;
         overlayManager.remove(yamaOverlay);
-        overlayManager.remove(verzikOverlay);
 
         log.info("PVM Kits plugin stopped!");
     }
@@ -148,10 +138,6 @@ public class PvmKitsPlugin extends Plugin {
 
     public YamaHandler getYamaHandler() {
         return yamaHandler;
-    }
-
-    public VerzikHandler getVerzikHandler() {
-        return verzikHandler;
     }
 
     @Provides
