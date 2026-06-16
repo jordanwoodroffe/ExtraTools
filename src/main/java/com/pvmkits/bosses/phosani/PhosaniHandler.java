@@ -329,6 +329,7 @@ public class PhosaniHandler implements BossHandler {
         newlyInitializedTimers.clear();
         phosaniCurseAttacks.clear();
         sporeDangerZones.clear();
+        log.info("PhosaniHandler reset - all state cleared");
     }
 
     // Handle spore danger zone creation
