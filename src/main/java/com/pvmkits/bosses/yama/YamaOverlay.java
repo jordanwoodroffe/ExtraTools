@@ -3,6 +3,7 @@ package com.pvmkits.bosses.yama;
 import com.pvmkits.PvmKitsConfig;
 import com.pvmkits.PvmKitsPlugin;
 import net.runelite.api.Client;
+import net.runelite.api.GameObject;
 import net.runelite.api.NPC;
 import net.runelite.api.Perspective;
 import net.runelite.api.coords.LocalPoint;
@@ -10,6 +11,7 @@ import net.runelite.client.ui.overlay.*;
 
 import javax.inject.Inject;
 import java.awt.*;
+import java.util.Collection;
 
 public class YamaOverlay extends Overlay {
 
@@ -31,8 +33,13 @@ public class YamaOverlay extends Overlay {
     @Override
     public Dimension render(Graphics2D graphics) {
         // Only render if Yama highlighting is enabled
-        if (!config.highlightYama() && !config.showAttackTimers()) {
+        if (!config.highlightYama() && !config.showAttackTimers() && !config.highlightBoulders()) {
             return null;
+        }
+
+        // Render floor glyph highlights (independent of the Yama NPC)
+        if (config.highlightBoulders()) {
+            renderGlyphs(graphics);
         }
 
         // First, render existing Yama highlights
@@ -63,6 +70,43 @@ public class YamaOverlay extends Overlay {
         }
 
         return null;
+    }
+
+    private void renderGlyphs(Graphics2D graphics) {
+        YamaHandler handler = plugin.getYamaHandler();
+        Collection<GameObject> glyphs = handler.getActiveGlyphObjects();
+        if (glyphs == null || glyphs.isEmpty()) {
+            return;
+        }
+
+        YamaHandler.GlyphType type = handler.getActiveGlyphType();
+        Color base = (type == YamaHandler.GlyphType.SHADOW)
+                ? config.shadowGlyphColor()
+                : config.fireGlyphColor();
+        Color fill = new Color(base.getRed(), base.getGreen(), base.getBlue(), config.glyphTransparency());
+
+        for (GameObject glyph : glyphs) {
+            if (glyph == null) {
+                continue;
+            }
+
+            Shape outline = glyph.getConvexHull();
+            if (outline == null) {
+                LocalPoint lp = glyph.getLocalLocation();
+                if (lp == null) {
+                    continue;
+                }
+                outline = Perspective.getCanvasTilePoly(client, lp);
+            }
+            if (outline == null) {
+                continue;
+            }
+
+            graphics.setColor(fill);
+            graphics.fill(outline);
+            graphics.setColor(base);
+            graphics.draw(outline);
+        }
     }
 
     @SuppressWarnings("deprecation") // Using deprecated LocalPoint constructor to match working example

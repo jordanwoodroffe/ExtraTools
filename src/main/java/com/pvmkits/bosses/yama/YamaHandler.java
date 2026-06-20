@@ -6,6 +6,9 @@ import net.runelite.api.*;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GraphicChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.GameObjectSpawned;
+import net.runelite.api.events.GameObjectDespawned;
+import net.runelite.api.events.ProjectileMoved;
 
 import javax.inject.Inject;
 import java.awt.Color;
@@ -61,6 +64,33 @@ public class YamaHandler implements BossHandler {
     // Cooldown duration in ticks after detecting an attack
     private static final int ATTACK_COOLDOWN_TICKS = 6;
 
+    // Glyph GameObject IDs and the elemental attacks that activate them.
+    // Detection is primarily via the Yama NPC's attack graphic (fires earlier),
+    // with the projectile kept as a fallback in case the graphic is missed.
+    private static final int GLYPH_FIRE_ID = 56336;
+    private static final int GLYPH_SHADOW_ID = 56335;
+    private static final int GRAPHIC_FIRE_ATTACK = 3253;
+    private static final int GRAPHIC_SHADOW_ATTACK = 3256;
+    private static final int PROJECTILE_FIRE_ATTACK = 3254;
+    private static final int PROJECTILE_SHADOW_ATTACK = 3257;
+
+    // Known glyph object IDs spawned during the Yama fight. If this set is made
+    // empty, discovery mode activates: every floor GameObject that spawns is
+    // tracked and highlighted (and logged at INFO) so new IDs can be identified.
+    private static final Set<Integer> GLYPH_OBJECT_IDS = new HashSet<>(Arrays.asList(
+            56335, 56336, 56337, 56338));
+
+    // Track active glyph GameObjects (keyed by TileObject hash)
+    private final Map<Long, GameObject> glyphObjects = new HashMap<>();
+
+    // Which glyph type is currently active, driven by the elemental attack
+    // projectile that was last seen (fire -> fire glyphs, shadow -> shadow glyphs)
+    private GlyphType activeGlyphType = GlyphType.NONE;
+
+    public enum GlyphType {
+        NONE, FIRE, SHADOW
+    }
+
     @Override
     public String getBossName() {
         return "Yama";
@@ -96,6 +126,27 @@ public class YamaHandler implements BossHandler {
     @Override
     public void onAnimationChanged(AnimationChanged event) {
         // Animation detection moved to onGameTick to match working example
+    }
+
+    @Override
+    public void onProjectileMoved(ProjectileMoved event) {
+        // Fallback only: the graphic change in onGraphicChanged fires earlier and is
+        // the preferred trigger. This catches the case where the graphic is missed.
+        int projectileId = event.getProjectile().getId();
+
+        if (projectileId == PROJECTILE_FIRE_ATTACK) {
+            setActiveGlyphType(GlyphType.FIRE, "projectile " + projectileId + " (fallback)");
+        } else if (projectileId == PROJECTILE_SHADOW_ATTACK) {
+            setActiveGlyphType(GlyphType.SHADOW, "projectile " + projectileId + " (fallback)");
+        }
+    }
+
+    private void setActiveGlyphType(GlyphType type, String source) {
+        if (activeGlyphType != type) {
+            activeGlyphType = type;
+            log.info("Yama " + type + " elemental attack detected via " + source
+                    + " - highlighting " + type + " glyphs");
+        }
     }
 
     @Override
@@ -154,6 +205,14 @@ public class YamaHandler implements BossHandler {
             yamaPhases.put(index, YamaPhase.RANGE);
         } else if (graphicId == GRAPHIC_GLYPH_ATTACK) {
             yamaPhases.put(index, YamaPhase.FIRE_SPECIAL); // Assuming glyph is a fire special attack
+        }
+
+        // Determine which glyphs to highlight based on the elemental attack graphic.
+        // This fires earlier than the projectile, giving more reaction time.
+        if (graphicId == GRAPHIC_FIRE_ATTACK) {
+            setActiveGlyphType(GlyphType.FIRE, "graphic " + graphicId);
+        } else if (graphicId == GRAPHIC_SHADOW_ATTACK) {
+            setActiveGlyphType(GlyphType.SHADOW, "graphic " + graphicId);
         }
     }
 
@@ -243,6 +302,8 @@ public class YamaHandler implements BossHandler {
             yamaAttackTimers.clear();
             phaseTransitionCounts.clear();
             attackCooldowns.clear();
+            glyphObjects.clear();
+            activeGlyphType = GlyphType.NONE;
             return;
         }
 
@@ -302,6 +363,68 @@ public class YamaHandler implements BossHandler {
         attackCooldowns.clear();
         lastLoggedAnimations.clear();
         newlyInitializedTimers.clear();
+        glyphObjects.clear();
+        activeGlyphType = GlyphType.NONE;
+    }
+
+    // Track glyph floor objects that spawn during the Yama fight
+    public void onGameObjectSpawned(GameObjectSpawned event) {
+        GameObject obj = event.getGameObject();
+        if (obj == null || !isYamaPresent()) {
+            return;
+        }
+
+        int id = obj.getId();
+
+        // In discovery mode (empty ID set) track everything; otherwise only glyphs
+        if (GLYPH_OBJECT_IDS.isEmpty() || GLYPH_OBJECT_IDS.contains(id)) {
+            glyphObjects.put(obj.getHash(), obj);
+            log.info("Yama glyph spawned: id=" + id + " at " + obj.getWorldLocation());
+        } else {
+            log.debug("Yama GameObject spawned (not a glyph): id=" + id + " at " + obj.getWorldLocation());
+        }
+    }
+
+    public void onGameObjectDespawned(GameObjectDespawned event) {
+        GameObject obj = event.getGameObject();
+        if (obj == null) {
+            return;
+        }
+        glyphObjects.remove(obj.getHash());
+    }
+
+    private boolean isYamaPresent() {
+        for (NPC npc : client.getTopLevelWorldView().npcs()) {
+            if (npc != null && npc.getId() == YAMA_ID) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public Collection<GameObject> getGlyphObjects() {
+        return glyphObjects.values();
+    }
+
+    public GlyphType getActiveGlyphType() {
+        return activeGlyphType;
+    }
+
+    // Glyphs to highlight right now: only those matching the active elemental
+    // attack. Returns empty until a fire or shadow attack projectile is seen.
+    public Collection<GameObject> getActiveGlyphObjects() {
+        if (activeGlyphType == GlyphType.NONE) {
+            return Collections.emptyList();
+        }
+
+        int targetId = activeGlyphType == GlyphType.FIRE ? GLYPH_FIRE_ID : GLYPH_SHADOW_ID;
+        List<GameObject> active = new ArrayList<>();
+        for (GameObject obj : glyphObjects.values()) {
+            if (obj != null && obj.getId() == targetId) {
+                active.add(obj);
+            }
+        }
+        return active;
     }
 
     // Helper methods

@@ -72,17 +72,32 @@ public interface PvmKitsConfig extends Config {
         return new Color(0, 255, 255); // Bright teal
     }
 
-    @ConfigItem(keyName = "highlightBoulders", name = "Highlight Boulder Areas", description = "Highlight Yama's 5x5 tile area for positioning reference", section = yama, position = 10)
+    @ConfigItem(keyName = "highlightBoulders", name = "Highlight Glyphs", description = "Highlight glyph objects that spawn on the floor during the Yama fight (fire glyphs on fire attacks, shadow glyphs on shadow attacks)", section = yama, position = 10)
     default boolean highlightBoulders() {
         return true;
     }
 
-    @ConfigItem(keyName = "boulderTransparency", name = "Boulder Highlight Transparency", description = "Transparency level for boulder area highlighting (0-255)", section = yama, position = 11)
+    @ConfigItem(keyName = "fireGlyphColor", name = "Fire Glyph Color", description = "Color used to highlight fire glyphs during Yama's fire elemental attack", section = yama, position = 11)
+    default Color fireGlyphColor() {
+        return new Color(255, 100, 0); // Orange
+    }
+
+    @ConfigItem(keyName = "shadowGlyphColor", name = "Shadow Glyph Color", description = "Color used to highlight shadow glyphs during Yama's shadow elemental attack", section = yama, position = 12)
+    default Color shadowGlyphColor() {
+        return new Color(150, 80, 220); // Purple
+    }
+
+    @ConfigItem(keyName = "glyphTransparency", name = "Glyph Highlight Transparency", description = "Transparency level for glyph highlighting (0-255)", section = yama, position = 13)
+    default int glyphTransparency() {
+        return 80;
+    }
+
+    @ConfigItem(keyName = "boulderTransparency", name = "Yama Area Highlight Transparency", description = "Transparency level for Yama's 5x5 area highlighting (0-255)", section = yama, position = 14)
     default int boulderTransparency() {
         return 50;
     }
 
-    @ConfigItem(keyName = "showBorderOnly", name = "Show Border Only", description = "Only show the border of Yama's area instead of filling it", section = yama, position = 12)
+    @ConfigItem(keyName = "showBorderOnly", name = "Show Border Only", description = "Only show the border of Yama's area instead of filling it", section = yama, position = 15)
     default boolean showBorderOnly() {
         return false;
     }
@@ -133,9 +148,14 @@ public interface PvmKitsConfig extends Config {
         return new Color(0, 255, 255); // Bright teal
     }
 
-    @ConfigItem(keyName = "phosaniTransparency", name = "Highlight Transparency", description = "Transparency level for Phosani area highlighting (0-255)", section = phosani, position = 9)
+    @ConfigItem(keyName = "phosaniTransparency", name = "Highlight Transparency", description = "Transparency level for Phosani tiles, sleepwalkers, husks, and spore highlighting (0-255)", section = phosani, position = 9)
     default int phosaniTransparency() {
         return 50;
+    }
+
+    @ConfigItem(keyName = "highlightPhosaniParasiteOutline", name = "Highlight Parasite Player Outline", description = "Draw a red outline around your player while you are infected by Phosani's parasite", section = phosani, position = 10)
+    default boolean highlightPhosaniParasiteOutline() {
+        return true;
     }
 
     @ConfigItem(keyName = "highlightSporeDangerZones", name = "Highlight Spore Danger Zones", description = "Show red borders around dangerous 3x3 spore areas", section = phosani, position = 11)
@@ -146,6 +166,41 @@ public interface PvmKitsConfig extends Config {
     @ConfigItem(keyName = "highlightSleepwalkers", name = "Highlight Sleepwalkers & Husks", description = "Highlight sleepwalkers and husks in soft red", section = phosani, position = 12)
     default boolean highlightSleepwalkers() {
         return true;
+    }
+
+    @ConfigItem(keyName = "showPhosaniSafeTile", name = "Show Shadow Phase Safe Tile", description = "Highlight a safe tile to stand on when undead hands spawn during the shadow phase", section = phosani, position = 13)
+    default boolean showPhosaniSafeTile() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "phosaniSafeTileColor", name = "Safe Tile Color", description = "Color used to highlight the shadow phase safe tile", section = phosani, position = 14)
+    default Color phosaniSafeTileColor() {
+        return new Color(0, 255, 0); // Green
+    }
+
+    @ConfigItem(keyName = "highlightPhosaniSurge", name = "Highlight Surge Path", description = "Highlight the straight-line danger zone when Phosani surges (charges) across the room", section = phosani, position = 15)
+    default boolean highlightPhosaniSurge() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "phosaniSurgeColor", name = "Surge Path Color", description = "Color used to highlight Phosani's surge (charge) flight path", section = phosani, position = 16)
+    default Color phosaniSurgeColor() {
+        return new Color(255, 0, 0); // Red
+    }
+
+    @ConfigItem(keyName = "highlightPhosaniTotems", name = "Highlight Totems", description = "Highlight the four totem NPCs during the totem charging phase, coloured by whether they still need charging or are full", section = phosani, position = 17)
+    default boolean highlightPhosaniTotems() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "phosaniTotemEmptyColor", name = "Totem (Needs Charging) Color", description = "Color used to highlight totems that still need to be charged", section = phosani, position = 18)
+    default Color phosaniTotemEmptyColor() {
+        return new Color(255, 140, 0); // Orange
+    }
+
+    @ConfigItem(keyName = "phosaniTotemFullColor", name = "Totem (Charged) Color", description = "Color used to highlight totems that are fully charged", section = phosani, position = 19)
+    default Color phosaniTotemFullColor() {
+        return new Color(0, 255, 0); // Green
     }
 
     // TODO: Add other boss config sections here when new bosses are implemented

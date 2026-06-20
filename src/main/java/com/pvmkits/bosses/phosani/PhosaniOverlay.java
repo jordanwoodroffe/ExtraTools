@@ -5,6 +5,8 @@ import com.pvmkits.PvmKitsPlugin;
 import net.runelite.api.Client;
 import net.runelite.api.NPC;
 import net.runelite.api.Perspective;
+import net.runelite.api.Player;
+import net.runelite.api.Varbits;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.ui.overlay.*;
@@ -19,6 +21,7 @@ public class PhosaniOverlay extends Overlay {
     private final PvmKitsPlugin plugin;
     private final PvmKitsConfig config;
     private static final int PHOSANI_SIZE = 5; // Phosani is 5x5 tiles
+
     private static final Set<Integer> PHOSANI_IDS = Set.of(9416, 9417, 9418, 9419, 9420, 9421, 9422, 9423, 9424, 11153,
             11154, 11155, 377);
 
@@ -29,6 +32,17 @@ public class PhosaniOverlay extends Overlay {
     // Husk NPC IDs for highlighting
     private static final Set<Integer> HUSK_IDS = Set.of(9454, 9455, 9466, 9467);
 
+    // Parasite NPC IDs for highlighting (9452/9453 = Nightmare, 9468/9469 = Phosani's)
+    private static final Set<Integer> PARASITE_IDS = Set.of(9452, 9453, 9468, 9469);
+
+    // Totem NPC IDs. Each corner totem has three consecutive ids: idle (dormant,
+    // present the whole fight), charging (vulnerable - needs charging during the
+    // totem phase) and full (charged). We only highlight charging/full so the
+    // overlay is naturally limited to the totem phase. Confirmed in-game:
+    // SW=9434/9435/9436, SE=9437/9438/9439, NW=9440/9441/9442, NE=9443/9444/9445.
+    private static final Set<Integer> TOTEM_NEEDS_CHARGE_IDS = Set.of(9435, 9438, 9441, 9444);
+    private static final Set<Integer> TOTEM_FULL_IDS = Set.of(9436, 9439, 9442, 9445);
+
     @Inject
     public PhosaniOverlay(Client client, PvmKitsPlugin plugin, PvmKitsConfig config) {
         this.client = client;
@@ -36,13 +50,16 @@ public class PhosaniOverlay extends Overlay {
         this.config = config;
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
+        setPriority(OverlayPriority.HIGHEST);
     }
 
     @Override
     public Dimension render(Graphics2D graphics) {
         // Only render if any Phosani features are enabled
         if (!config.highlightPhosani() && !config.showPhosaniAttackTimers() && !config.highlightSporeDangerZones()
-                && !config.highlightSleepwalkers()) {
+                && !config.highlightSleepwalkers() && !config.showPhosaniSafeTile()
+                && !config.highlightPhosaniTotems() && !config.highlightPhosaniSurge()
+                && !config.highlightPhosaniParasiteOutline()) {
             return null;
         }
 
@@ -53,13 +70,18 @@ public class PhosaniOverlay extends Overlay {
         }
 
         // Render existing Phosani highlights
+        boolean phosaniVisible = false;
         for (NPC npc : client.getTopLevelWorldView().npcs()) {
             if (npc == null || !PHOSANI_IDS.contains(npc.getId())) {
                 continue;
             }
+            phosaniVisible = true;
 
-            // Get the effective phase color for this Phosani (accounts for curse)
-            PhosaniHandler.PhosaniPhase effectivePhase = phosaniHandler.getEffectivePhase(npc.getIndex());
+            // Get the effective phase color for this Phosani (accounts for curse).
+            // This is the same logic that drives the overlay colour, so the prayer
+            // we compare against is correct even while the curse shuffles prayers.
+            int npcIndex = npc.getIndex();
+            PhosaniHandler.PhosaniPhase effectivePhase = phosaniHandler.getEffectivePhase(npcIndex);
             Color tileColor = effectivePhase.getColor();
 
             // Get base tile location of the NPC
@@ -71,6 +93,12 @@ public class PhosaniOverlay extends Overlay {
             // Render attack style overlay if enabled
             if (config.highlightPhosani()) {
                 renderAttackStyleOverlay(graphics, npc, tileColor);
+
+                // While cursed, draw the center tile purple on top of the attack
+                // style overlay so the curse phase is clearly distinguishable.
+                if (phosaniHandler.isPhosaniCursed(npcIndex)) {
+                    renderCurseCenterTile(graphics, npc);
+                }
             }
 
             // Render attack timer if enabled
@@ -79,9 +107,19 @@ public class PhosaniOverlay extends Overlay {
             }
         }
 
+        // Highlight the local player outline red while infected by parasite.
+        if (config.highlightPhosaniParasiteOutline() && phosaniVisible && isLocalPlayerParasiteDebuffed()) {
+            renderPlayerOutlineFlash(graphics);
+        }
+
         // Render spore danger zones if enabled
         if (config.highlightSporeDangerZones()) {
             renderSporeDangerZones(graphics, phosaniHandler);
+        }
+
+        // Render the surge (charge) flight-path danger zone if enabled
+        if (config.highlightPhosaniSurge()) {
+            renderSurgeDangerZone(graphics, phosaniHandler);
         }
 
         // Render sleepwalker highlighting if enabled
@@ -89,7 +127,52 @@ public class PhosaniOverlay extends Overlay {
             renderSleepwalkerHighlights(graphics);
         }
 
+        // Render the shadow phase safe tile if enabled
+        if (config.showPhosaniSafeTile()) {
+            renderSafeTile(graphics, phosaniHandler);
+        }
+
+        // Render totem highlights if enabled
+        if (config.highlightPhosaniTotems()) {
+            renderTotemHighlights(graphics);
+        }
+
         return null;
+    }
+
+    private void renderPlayerOutlineFlash(Graphics2D graphics) {
+        Player localPlayer = client.getLocalPlayer();
+        if (localPlayer == null) {
+            return;
+        }
+
+        Shape outline = localPlayer.getConvexHull();
+
+        // Fallback to true-tile border when the model hull is unavailable.
+        if (outline == null) {
+            WorldPoint trueTile = localPlayer.getWorldLocation();
+            if (trueTile == null) {
+                return;
+            }
+
+            LocalPoint localTile = LocalPoint.fromWorld(client, trueTile);
+            if (localTile == null) {
+                return;
+            }
+
+            outline = Perspective.getCanvasTilePoly(client, localTile);
+            if (outline == null) {
+                return;
+            }
+        }
+
+        graphics.setColor(new Color(255, 0, 0, 240));
+        graphics.setStroke(new BasicStroke(2));
+        graphics.draw(outline);
+    }
+
+    private boolean isLocalPlayerParasiteDebuffed() {
+        return client.getVarbitValue(Varbits.PARASITE) > 0;
     }
 
     @SuppressWarnings("deprecation") // Using deprecated LocalPoint constructor to match working example
@@ -144,6 +227,31 @@ public class PhosaniOverlay extends Overlay {
         // Draw just the outer border with solid color
         graphics.setColor(tileColor);
         graphics.draw(borderPoly);
+    }
+
+    @SuppressWarnings("deprecation") // Using deprecated LocalPoint constructor to match working example
+    private void renderCurseCenterTile(Graphics2D graphics, NPC npc) {
+        LocalPoint basePoint = npc.getLocalLocation();
+        if (basePoint == null) {
+            return;
+        }
+
+        Polygon tilePoly = Perspective.getCanvasTilePoly(client, basePoint);
+        if (tilePoly == null) {
+            return;
+        }
+
+        Color purple = new Color(128, 0, 128);
+
+        // Fill the center tile with a semi-transparent purple (same opacity config
+        // as the safe tile), then draw a solid 1px purple border to match its style.
+        graphics.setColor(new Color(purple.getRed(), purple.getGreen(),
+                purple.getBlue(), config.phosaniTransparency()));
+        graphics.fill(tilePoly);
+
+        graphics.setColor(purple);
+        graphics.setStroke(new BasicStroke(1));
+        graphics.draw(tilePoly);
     }
 
     private void renderAttackTimer(Graphics2D graphics, NPC npc, PhosaniHandler phosaniHandler) {
@@ -262,19 +370,127 @@ public class PhosaniOverlay extends Overlay {
         // West edge (NW to SW)
         addPointsToPolygon(borderPoly, nwPoly, 3, 0);
 
+        int transparency = config.phosaniTransparency();
+
         // Fill the 3x3 area with soft red semi-transparent color
-        graphics.setColor(new Color(255, 0, 0, 80)); // Soft red fill with low opacity
+        graphics.setColor(new Color(255, 0, 0, transparency));
         graphics.fill(borderPoly);
 
-        // Draw only the border with soft red color (more opaque)
-        graphics.setColor(new Color(255, 0, 0, 180)); // Soft red with transparency
-        graphics.setStroke(new BasicStroke(3)); // Make border thicker for visibility
+        // Draw only the border with soft red color (slightly more opaque for readability)
+        graphics.setColor(new Color(255, 0, 0, Math.min(255, transparency + 100)));
+        graphics.setStroke(new BasicStroke(1));
         graphics.draw(borderPoly);
+    }
+
+    @SuppressWarnings("deprecation") // Using deprecated LocalPoint usage to match working example
+    private void renderSurgeDangerZone(Graphics2D graphics, PhosaniHandler phosaniHandler) {
+        Set<WorldPoint> surgeTiles = phosaniHandler.getSurgeDangerZone();
+        if (surgeTiles == null || surgeTiles.isEmpty()) {
+            return;
+        }
+
+        Color surgeColor = config.phosaniSurgeColor();
+        Color fillColor = new Color(surgeColor.getRed(), surgeColor.getGreen(),
+                surgeColor.getBlue(), config.phosaniTransparency());
+        Color borderColor = new Color(surgeColor.getRed(), surgeColor.getGreen(),
+                surgeColor.getBlue(), Math.min(255, config.phosaniTransparency() + 100));
+
+        // First pass: fill every tile in the surge zone.
+        for (WorldPoint tile : surgeTiles) {
+            LocalPoint localPoint = LocalPoint.fromWorld(client, tile);
+            if (localPoint == null) {
+                continue;
+            }
+
+            Polygon tilePoly = Perspective.getCanvasTilePoly(client, localPoint);
+            if (tilePoly == null) {
+                continue;
+            }
+
+            graphics.setColor(fillColor);
+            graphics.fill(tilePoly);
+        }
+
+        // Second pass: draw only the outer perimeter by stroking each tile edge
+        // whose neighbouring tile is not part of the surge zone. This forms a single
+        // larger border around the full shape rather than per-tile boxes.
+        graphics.setColor(borderColor);
+        graphics.setStroke(new BasicStroke(2));
+        for (WorldPoint tile : surgeTiles) {
+            LocalPoint localPoint = LocalPoint.fromWorld(client, tile);
+            if (localPoint == null) {
+                continue;
+            }
+
+            Polygon tilePoly = Perspective.getCanvasTilePoly(client, localPoint);
+            if (tilePoly == null || tilePoly.npoints < 4) {
+                continue;
+            }
+
+            // Tile poly corners: 0 = SW, 1 = SE, 2 = NE, 3 = NW.
+            // South edge (no tile to the south)
+            if (!surgeTiles.contains(tile.dy(-1))) {
+                drawTileEdge(graphics, tilePoly, 0, 1);
+            }
+            // East edge (no tile to the east)
+            if (!surgeTiles.contains(tile.dx(1))) {
+                drawTileEdge(graphics, tilePoly, 1, 2);
+            }
+            // North edge (no tile to the north)
+            if (!surgeTiles.contains(tile.dy(1))) {
+                drawTileEdge(graphics, tilePoly, 2, 3);
+            }
+            // West edge (no tile to the west)
+            if (!surgeTiles.contains(tile.dx(-1))) {
+                drawTileEdge(graphics, tilePoly, 3, 0);
+            }
+        }
+    }
+
+    private void drawTileEdge(Graphics2D graphics, Polygon tilePoly, int startIdx, int endIdx) {
+        graphics.drawLine(tilePoly.xpoints[startIdx], tilePoly.ypoints[startIdx],
+                tilePoly.xpoints[endIdx], tilePoly.ypoints[endIdx]);
+    }
+
+    @SuppressWarnings("deprecation") // Using deprecated LocalPoint usage to match working example
+    private void renderSafeTile(Graphics2D graphics, PhosaniHandler phosaniHandler) {
+        Set<WorldPoint> safeTiles = phosaniHandler.getSafeTiles();
+        if (safeTiles == null || safeTiles.isEmpty()) {
+            return;
+        }
+
+        Color safeColor = config.phosaniSafeTileColor();
+        Color fillColor = new Color(safeColor.getRed(), safeColor.getGreen(),
+                safeColor.getBlue(), config.phosaniTransparency());
+
+        // Highlight every safe tile option so the player can pick where to move.
+        for (WorldPoint safeTile : safeTiles) {
+            LocalPoint localPoint = LocalPoint.fromWorld(client, safeTile);
+            if (localPoint == null) {
+                continue;
+            }
+
+            Polygon tilePoly = Perspective.getCanvasTilePoly(client, localPoint);
+            if (tilePoly == null) {
+                continue;
+            }
+
+            // Fill the safe tile with a semi-transparent green
+            graphics.setColor(fillColor);
+            graphics.fill(tilePoly);
+
+            // Draw a solid green border
+            graphics.setColor(safeColor);
+            graphics.setStroke(new BasicStroke(1));
+            graphics.draw(tilePoly);
+        }
     }
 
     private void renderSleepwalkerHighlights(Graphics2D graphics) {
         // Soft red color for sleepwalkers and husks
-        Color softRed = new Color(255, 100, 100, 120); // Soft red with transparency
+        Color softRed = new Color(255, 100, 100, config.phosaniTransparency());
+        Color lighterRed = new Color(255, 140, 140, config.phosaniTransparency());
+        boolean parasiteFlashTick = (client.getTickCount() & 1) == 0;
 
         // Find and highlight all sleepwalkers and husks
         for (NPC npc : client.getTopLevelWorldView().npcs()) {
@@ -285,9 +501,33 @@ public class PhosaniOverlay extends Overlay {
             // Check if this NPC is a sleepwalker or husk
             boolean isSleepwalker = SLEEPWALKER_IDS.contains(npc.getId());
             boolean isHusk = HUSK_IDS.contains(npc.getId());
+            boolean isParasite = PARASITE_IDS.contains(npc.getId());
 
             if (isSleepwalker || isHusk) {
                 renderNpcHighlight(graphics, npc, softRed);
+            } else if (isParasite) {
+                renderNpcHighlight(graphics, npc, parasiteFlashTick ? lighterRed : softRed);
+            }
+        }
+    }
+
+    private void renderTotemHighlights(Graphics2D graphics) {
+        int alpha = config.phosaniTransparency();
+        Color emptyBase = config.phosaniTotemEmptyColor();
+        Color fullBase = config.phosaniTotemFullColor();
+        Color emptyColor = new Color(emptyBase.getRed(), emptyBase.getGreen(), emptyBase.getBlue(), alpha);
+        Color fullColor = new Color(fullBase.getRed(), fullBase.getGreen(), fullBase.getBlue(), alpha);
+
+        for (NPC npc : client.getTopLevelWorldView().npcs()) {
+            if (npc == null) {
+                continue;
+            }
+
+            int id = npc.getId();
+            if (TOTEM_NEEDS_CHARGE_IDS.contains(id)) {
+                renderNpcHighlight(graphics, npc, emptyColor);
+            } else if (TOTEM_FULL_IDS.contains(id)) {
+                renderNpcHighlight(graphics, npc, fullColor);
             }
         }
     }
@@ -296,6 +536,20 @@ public class PhosaniOverlay extends Overlay {
         LocalPoint npcLocation = npc.getLocalLocation();
         if (npcLocation == null) {
             return;
+        }
+
+        // Draw the NPC hull as an additional cue so targets remain visible in crowds.
+        Shape hull = npc.getConvexHull();
+        if (hull != null) {
+            int hullAlpha = Math.max(20, highlightColor.getAlpha() / 2);
+            graphics.setColor(new Color(highlightColor.getRed(), highlightColor.getGreen(),
+                    highlightColor.getBlue(), hullAlpha));
+            graphics.fill(hull);
+
+            graphics.setColor(new Color(highlightColor.getRed(), highlightColor.getGreen(),
+                    highlightColor.getBlue(), Math.min(255, highlightColor.getAlpha() + 100)));
+            graphics.setStroke(new BasicStroke(1));
+            graphics.draw(hull);
         }
 
         // Highlight the tile
@@ -307,18 +561,10 @@ public class PhosaniOverlay extends Overlay {
 
             // Draw tile border with solid color
             graphics.setColor(new Color(highlightColor.getRed(), highlightColor.getGreen(),
-                    highlightColor.getBlue(), 255)); // Full opacity for border
+                    highlightColor.getBlue(), Math.min(255, highlightColor.getAlpha() + 100)));
             graphics.setStroke(new BasicStroke(2));
             graphics.draw(tilePoly);
         }
 
-        // Highlight the hull
-        Shape hull = npc.getConvexHull();
-        if (hull != null) {
-            // Draw hull outline with soft red
-            graphics.setColor(new Color(255, 0, 0, 200)); // Slightly more opaque red for hull
-            graphics.setStroke(new BasicStroke(2));
-            graphics.draw(hull);
-        }
     }
 }

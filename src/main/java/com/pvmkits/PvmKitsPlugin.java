@@ -157,17 +157,23 @@ public class PvmKitsPlugin extends Plugin {
 
     @Subscribe
     public void onGameObjectSpawned(GameObjectSpawned event) {
-        // Forward to Phosani handler specifically for spore tracking
+        // Forward to Phosani handler for spore tracking and Yama handler for glyphs
         if (phosaniHandler != null) {
             phosaniHandler.onGameObjectSpawned(event);
+        }
+        if (yamaHandler != null) {
+            yamaHandler.onGameObjectSpawned(event);
         }
     }
 
     @Subscribe
     public void onGameObjectDespawned(GameObjectDespawned event) {
-        // Forward to Phosani handler specifically for spore tracking
+        // Forward to Phosani handler for spore tracking and Yama handler for glyphs
         if (phosaniHandler != null) {
             phosaniHandler.onGameObjectDespawned(event);
+        }
+        if (yamaHandler != null) {
+            yamaHandler.onGameObjectDespawned(event);
         }
     }
 
