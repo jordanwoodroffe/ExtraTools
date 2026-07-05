@@ -1,4 +1,4 @@
-package com.pvmkits.bosses.phosani;
+package com.pvmkits.bosses.nightmare;
 
 import com.pvmkits.PvmKitsConfig;
 import com.pvmkits.PvmKitsPlugin;
@@ -15,36 +15,17 @@ import javax.inject.Inject;
 import java.awt.*;
 import java.util.Set;
 
-public class PhosaniOverlay extends Overlay {
+public class NightmareOverlay extends Overlay {
 
     private final Client client;
     private final PvmKitsPlugin plugin;
     private final PvmKitsConfig config;
-    private static final int PHOSANI_SIZE = 5; // Phosani is 5x5 tiles
+    private static final int NIGHTMARE_SIZE = 5; // Nightmare is 5x5 tiles
 
-    private static final Set<Integer> PHOSANI_IDS = Set.of(9416, 9417, 9418, 9419, 9420, 9421, 9422, 9423, 9424, 11153,
-            11154, 11155, 377);
-
-    // Sleepwalker NPC IDs for highlighting
-    private static final Set<Integer> SLEEPWALKER_IDS = Set.of(1029, 1030, 1031, 1032, 5267, 5368, 9446, 9447, 9448,
-            9449, 9450, 9451, 9470, 9801, 9802);
-
-    // Husk NPC IDs for highlighting
-    private static final Set<Integer> HUSK_IDS = Set.of(9454, 9455, 9466, 9467);
-
-    // Parasite NPC IDs for highlighting (9452/9453 = Nightmare, 9468/9469 = Phosani's)
-    private static final Set<Integer> PARASITE_IDS = Set.of(9452, 9453, 9468, 9469);
-
-    // Totem NPC IDs. Each corner totem has three consecutive ids: idle (dormant,
-    // present the whole fight), charging (vulnerable - needs charging during the
-    // totem phase) and full (charged). We only highlight charging/full so the
-    // overlay is naturally limited to the totem phase. Confirmed in-game:
-    // SW=9434/9435/9436, SE=9437/9438/9439, NW=9440/9441/9442, NE=9443/9444/9445.
-    private static final Set<Integer> TOTEM_NEEDS_CHARGE_IDS = Set.of(9435, 9438, 9441, 9444);
-    private static final Set<Integer> TOTEM_FULL_IDS = Set.of(9436, 9439, 9442, 9445);
+    private static final Set<Integer> NIGHTMARE_IDS = Set.of(9425, 9426, 9427, 9428, 9429, 9430, 9431, 9432, 9433);
 
     @Inject
-    public PhosaniOverlay(Client client, PvmKitsPlugin plugin, PvmKitsConfig config) {
+    public NightmareOverlay(Client client, PvmKitsPlugin plugin, PvmKitsConfig config) {
         this.client = client;
         this.plugin = plugin;
         this.config = config;
@@ -55,36 +36,39 @@ public class PhosaniOverlay extends Overlay {
 
     @Override
     public Dimension render(Graphics2D graphics) {
-        // Only render if any Phosani features are enabled
-        if (!config.highlightPhosani() && !config.showPhosaniAttackTimers() && !config.highlightSporeDangerZones()
-                && !config.highlightSleepwalkers() && !config.showPhosaniSafeTile()
-                && !config.highlightPhosaniTotems() && !config.highlightPhosaniSurge()
+        // Only render if any Nightmare features are enabled. The shared adds
+        // (sleepwalkers, husks, parasites, totems and spore danger zones) are NPC- and
+        // object-id based and are already drawn by the Phosani overlay during this
+        // fight, so this overlay only handles the cues that depend on The Nightmare's
+        // own NPC ids: attack style, curse, attack timers, safe tiles and surge.
+        if (!config.highlightPhosani() && !config.showPhosaniAttackTimers()
+                && !config.showPhosaniSafeTile() && !config.highlightPhosaniSurge()
                 && !config.highlightPhosaniParasiteOutline()) {
             return null;
         }
 
-        // Get the Phosani handler from the plugin
-        PhosaniHandler phosaniHandler = plugin.getPhosaniHandler();
-        if (phosaniHandler == null) {
+        // Get the Nightmare handler from the plugin
+        NightmareHandler nightmareHandler = plugin.getNightmareHandler();
+        if (nightmareHandler == null) {
             return null;
         }
 
-        // Render existing Phosani highlights
-        boolean phosaniVisible = false;
-        // During the spore phase Phosani doesn't attack, so suppress the attack
+        // Render existing Nightmare highlights
+        boolean nightmareVisible = false;
+        // During the spore phase Nightmare doesn't attack, so suppress the attack
         // style overlay to cut down on UI clutter.
-        boolean sporePhaseActive = phosaniHandler.isSporePhaseActive();
+        boolean sporePhaseActive = nightmareHandler.isSporePhaseActive();
         for (NPC npc : client.getTopLevelWorldView().npcs()) {
-            if (npc == null || !PHOSANI_IDS.contains(npc.getId())) {
+            if (npc == null || !NIGHTMARE_IDS.contains(npc.getId())) {
                 continue;
             }
-            phosaniVisible = true;
+            nightmareVisible = true;
 
-            // Get the effective phase color for this Phosani (accounts for curse).
+            // Get the effective phase color for this Nightmare (accounts for curse).
             // This is the same logic that drives the overlay colour, so the prayer
             // we compare against is correct even while the curse shuffles prayers.
             int npcIndex = npc.getIndex();
-            PhosaniHandler.PhosaniPhase effectivePhase = phosaniHandler.getEffectivePhase(npcIndex);
+            NightmareHandler.NightmarePhase effectivePhase = nightmareHandler.getEffectivePhase(npcIndex);
             Color tileColor = effectivePhase.getColor();
 
             // Get base tile location of the NPC
@@ -99,45 +83,30 @@ public class PhosaniOverlay extends Overlay {
 
                 // While cursed, draw the center tile purple on top of the attack
                 // style overlay so the curse phase is clearly distinguishable.
-                if (phosaniHandler.isPhosaniCursed(npcIndex)) {
+                if (nightmareHandler.isNightmareCursed(npcIndex)) {
                     renderCurseCenterTile(graphics, npc);
                 }
             }
 
             // Render attack timer if enabled
             if (config.showPhosaniAttackTimers()) {
-                renderAttackTimer(graphics, npc, phosaniHandler);
+                renderAttackTimer(graphics, npc, nightmareHandler);
             }
         }
 
         // Highlight the local player outline red while infected by parasite.
-        if (config.highlightPhosaniParasiteOutline() && phosaniVisible && isLocalPlayerParasiteDebuffed()) {
+        if (config.highlightPhosaniParasiteOutline() && nightmareVisible && isLocalPlayerParasiteDebuffed()) {
             renderPlayerOutlineFlash(graphics);
-        }
-
-        // Render spore danger zones if enabled
-        if (config.highlightSporeDangerZones()) {
-            renderSporeDangerZones(graphics, phosaniHandler);
         }
 
         // Render the surge (charge) flight-path danger zone if enabled
         if (config.highlightPhosaniSurge()) {
-            renderSurgeDangerZone(graphics, phosaniHandler);
-        }
-
-        // Render sleepwalker highlighting if enabled
-        if (config.highlightSleepwalkers()) {
-            renderSleepwalkerHighlights(graphics);
+            renderSurgeDangerZone(graphics, nightmareHandler);
         }
 
         // Render the shadow phase safe tile if enabled
         if (config.showPhosaniSafeTile()) {
-            renderSafeTile(graphics, phosaniHandler);
-        }
-
-        // Render totem highlights if enabled
-        if (config.highlightPhosaniTotems()) {
-            renderTotemHighlights(graphics);
+            renderSafeTile(graphics, nightmareHandler);
         }
 
         return null;
@@ -186,12 +155,12 @@ public class PhosaniOverlay extends Overlay {
         }
 
         // Calculate the southwest corner of the 5x5 area
-        int swX = basePoint.getX() - (Perspective.LOCAL_TILE_SIZE * (PHOSANI_SIZE - 1) / 2);
-        int swY = basePoint.getY() - (Perspective.LOCAL_TILE_SIZE * (PHOSANI_SIZE - 1) / 2);
+        int swX = basePoint.getX() - (Perspective.LOCAL_TILE_SIZE * (NIGHTMARE_SIZE - 1) / 2);
+        int swY = basePoint.getY() - (Perspective.LOCAL_TILE_SIZE * (NIGHTMARE_SIZE - 1) / 2);
 
         // Calculate the northeast corner of the 5x5 area
-        int neX = swX + ((PHOSANI_SIZE - 1) * Perspective.LOCAL_TILE_SIZE);
-        int neY = swY + ((PHOSANI_SIZE - 1) * Perspective.LOCAL_TILE_SIZE);
+        int neX = swX + ((NIGHTMARE_SIZE - 1) * Perspective.LOCAL_TILE_SIZE);
+        int neY = swY + ((NIGHTMARE_SIZE - 1) * Perspective.LOCAL_TILE_SIZE);
 
         // Create LocalPoints for the four corners of the 5x5 area
         LocalPoint swPoint = new LocalPoint(swX, swY);
@@ -257,15 +226,15 @@ public class PhosaniOverlay extends Overlay {
         graphics.draw(tilePoly);
     }
 
-    private void renderAttackTimer(Graphics2D graphics, NPC npc, PhosaniHandler phosaniHandler) {
-        // Display attack timer at a static position relative to Phosani's hull
+    private void renderAttackTimer(Graphics2D graphics, NPC npc, NightmareHandler nightmareHandler) {
+        // Display attack timer at a static position relative to Nightmare's hull
         int npcIndex = npc.getIndex();
-        int attackTimer = phosaniHandler.getPhosaniAttackTimer(npcIndex);
+        int attackTimer = nightmareHandler.getNightmareAttackTimer(npcIndex);
 
         // Only render if timer is valid and greater than 0
         if (attackTimer > 0) {
             // Use NPC's base tile location for rock-solid positioning
-            // This moves with Phosani but doesn't wobble with animations
+            // This moves with Nightmare but doesn't wobble with animations
             LocalPoint basePoint = npc.getLocalLocation();
             if (basePoint != null) {
                 // Convert to canvas coordinates using the stable base tile location
@@ -320,81 +289,9 @@ public class PhosaniOverlay extends Overlay {
         }
     }
 
-    private void renderSporeDangerZones(Graphics2D graphics, PhosaniHandler phosaniHandler) {
-        // Get spore danger zones from handler
-        for (WorldPoint sporeLocation : phosaniHandler.getSporeDangerZones()) {
-            // Render 3x3 danger zone around each spore (center + 1 tile radius)
-            renderSporeDangerZone(graphics, sporeLocation);
-        }
-    }
-
-    @SuppressWarnings("deprecation") // Using deprecated LocalPoint constructor to match working example
-    private void renderSporeDangerZone(Graphics2D graphics, WorldPoint centerLocation) {
-        // Create 3x3 area around the spore location (center + 1 tile radius)
-        LocalPoint centerPoint = LocalPoint.fromWorld(client, centerLocation);
-        if (centerPoint == null) {
-            return;
-        }
-
-        // Calculate the southwest corner of the 3x3 area
-        int swX = centerPoint.getX() - Perspective.LOCAL_TILE_SIZE;
-        int swY = centerPoint.getY() - Perspective.LOCAL_TILE_SIZE;
-
-        // Calculate the northeast corner of the 3x3 area
-        int neX = swX + (2 * Perspective.LOCAL_TILE_SIZE);
-        int neY = swY + (2 * Perspective.LOCAL_TILE_SIZE);
-
-        // Create LocalPoints for the four corners of the 3x3 area
-        LocalPoint swPoint = new LocalPoint(swX, swY);
-        LocalPoint sePoint = new LocalPoint(neX, swY);
-        LocalPoint nePoint = new LocalPoint(neX, neY);
-        LocalPoint nwPoint = new LocalPoint(swX, neY);
-
-        // Get the polygons for each corner tile
-        Polygon swPoly = Perspective.getCanvasTilePoly(client, swPoint);
-        Polygon sePoly = Perspective.getCanvasTilePoly(client, sePoint);
-        Polygon nePoly = Perspective.getCanvasTilePoly(client, nePoint);
-        Polygon nwPoly = Perspective.getCanvasTilePoly(client, nwPoint);
-
-        if (swPoly == null || sePoly == null || nePoly == null || nwPoly == null) {
-            return;
-        }
-
-        // Create a consolidated area polygon for the 3x3 border
-        Polygon borderPoly = new Polygon();
-
-        // Add the outer points of the 3x3 area to create the border
-        // South edge (SW to SE)
-        addPointsToPolygon(borderPoly, swPoly, 0, 1);
-        // East edge (SE to NE)
-        addPointsToPolygon(borderPoly, sePoly, 1, 2);
-        // North edge (NE to NW)
-        addPointsToPolygon(borderPoly, nePoly, 2, 3);
-        // West edge (NW to SW)
-        addPointsToPolygon(borderPoly, nwPoly, 3, 0);
-
-        int transparency = config.phosaniTransparency();
-
-        // Muted (less saturated) red so the danger zone is easier on the eyes
-        // while staying clearly readable as a hazard.
-        final int sporeR = 190;
-        final int sporeG = 55;
-        final int sporeB = 55;
-
-        // Light fill so the floor stays visible but the zone is still obvious.
-        // Use a floor of 45 so it never disappears even if the config value is low.
-        graphics.setColor(new Color(sporeR, sporeG, sporeB, Math.max(45, transparency)));
-        graphics.fill(borderPoly);
-
-        // Draw the border slightly more opaque than the fill for readability.
-        graphics.setColor(new Color(sporeR, sporeG, sporeB, Math.min(255, transparency + 40)));
-        graphics.setStroke(new BasicStroke(1));
-        graphics.draw(borderPoly);
-    }
-
     @SuppressWarnings("deprecation") // Using deprecated LocalPoint usage to match working example
-    private void renderSurgeDangerZone(Graphics2D graphics, PhosaniHandler phosaniHandler) {
-        Set<WorldPoint> surgeTiles = phosaniHandler.getSurgeDangerZone();
+    private void renderSurgeDangerZone(Graphics2D graphics, NightmareHandler nightmareHandler) {
+        Set<WorldPoint> surgeTiles = nightmareHandler.getSurgeDangerZone();
         if (surgeTiles == null || surgeTiles.isEmpty()) {
             return;
         }
@@ -463,8 +360,8 @@ public class PhosaniOverlay extends Overlay {
     }
 
     @SuppressWarnings("deprecation") // Using deprecated LocalPoint usage to match working example
-    private void renderSafeTile(Graphics2D graphics, PhosaniHandler phosaniHandler) {
-        Set<WorldPoint> safeTiles = phosaniHandler.getSafeTiles();
+    private void renderSafeTile(Graphics2D graphics, NightmareHandler nightmareHandler) {
+        Set<WorldPoint> safeTiles = nightmareHandler.getSafeTiles();
         if (safeTiles == null || safeTiles.isEmpty()) {
             return;
         }
@@ -494,87 +391,5 @@ public class PhosaniOverlay extends Overlay {
             graphics.setStroke(new BasicStroke(1));
             graphics.draw(tilePoly);
         }
-    }
-
-    private void renderSleepwalkerHighlights(Graphics2D graphics) {
-        // Soft red color for sleepwalkers and husks
-        Color softRed = new Color(255, 100, 100, config.phosaniTransparency());
-        Color lighterRed = new Color(255, 140, 140, config.phosaniTransparency());
-        boolean parasiteFlashTick = (client.getTickCount() & 1) == 0;
-
-        // Find and highlight all sleepwalkers and husks
-        for (NPC npc : client.getTopLevelWorldView().npcs()) {
-            if (npc == null) {
-                continue;
-            }
-
-            // Check if this NPC is a sleepwalker or husk
-            boolean isSleepwalker = SLEEPWALKER_IDS.contains(npc.getId());
-            boolean isHusk = HUSK_IDS.contains(npc.getId());
-            boolean isParasite = PARASITE_IDS.contains(npc.getId());
-
-            if (isSleepwalker || isHusk) {
-                renderNpcHighlight(graphics, npc, softRed);
-            } else if (isParasite) {
-                renderNpcHighlight(graphics, npc, parasiteFlashTick ? lighterRed : softRed);
-            }
-        }
-    }
-
-    private void renderTotemHighlights(Graphics2D graphics) {
-        int alpha = config.phosaniTransparency();
-        Color emptyBase = config.phosaniTotemEmptyColor();
-        Color fullBase = config.phosaniTotemFullColor();
-        Color emptyColor = new Color(emptyBase.getRed(), emptyBase.getGreen(), emptyBase.getBlue(), alpha);
-        Color fullColor = new Color(fullBase.getRed(), fullBase.getGreen(), fullBase.getBlue(), alpha);
-
-        for (NPC npc : client.getTopLevelWorldView().npcs()) {
-            if (npc == null) {
-                continue;
-            }
-
-            int id = npc.getId();
-            if (TOTEM_NEEDS_CHARGE_IDS.contains(id)) {
-                renderNpcHighlight(graphics, npc, emptyColor);
-            } else if (TOTEM_FULL_IDS.contains(id)) {
-                renderNpcHighlight(graphics, npc, fullColor);
-            }
-        }
-    }
-
-    private void renderNpcHighlight(Graphics2D graphics, NPC npc, Color highlightColor) {
-        LocalPoint npcLocation = npc.getLocalLocation();
-        if (npcLocation == null) {
-            return;
-        }
-
-        // Draw the NPC hull as an additional cue so targets remain visible in crowds.
-        Shape hull = npc.getConvexHull();
-        if (hull != null) {
-            int hullAlpha = Math.max(20, highlightColor.getAlpha() / 2);
-            graphics.setColor(new Color(highlightColor.getRed(), highlightColor.getGreen(),
-                    highlightColor.getBlue(), hullAlpha));
-            graphics.fill(hull);
-
-            graphics.setColor(new Color(highlightColor.getRed(), highlightColor.getGreen(),
-                    highlightColor.getBlue(), Math.min(255, highlightColor.getAlpha() + 100)));
-            graphics.setStroke(new BasicStroke(1));
-            graphics.draw(hull);
-        }
-
-        // Highlight the tile
-        Polygon tilePoly = Perspective.getCanvasTilePoly(client, npcLocation);
-        if (tilePoly != null) {
-            // Fill tile with semi-transparent color
-            graphics.setColor(highlightColor);
-            graphics.fill(tilePoly);
-
-            // Draw tile border with solid color
-            graphics.setColor(new Color(highlightColor.getRed(), highlightColor.getGreen(),
-                    highlightColor.getBlue(), Math.min(255, highlightColor.getAlpha() + 100)));
-            graphics.setStroke(new BasicStroke(2));
-            graphics.draw(tilePoly);
-        }
-
     }
 }
