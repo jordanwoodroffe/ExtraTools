@@ -258,14 +258,8 @@ public class NightmareOverlay extends Overlay {
                     int textX = centerX - (textWidth / 2);
                     int textY = stableY + (textHeight / 4);
 
-                    // Draw main text - use config colors
-                    Color textColor;
-                    if (attackTimer == 1) {
-                        textColor = config.phosaniWarningColor(); // Bright red for '1'
-                    } else {
-                        textColor = config.phosaniNormalTimerColor(); // Bright teal for other numbers
-                    }
-                    graphics.setColor(textColor);
+                    // Draw main text - use config color
+                    graphics.setColor(config.phosaniAttackTimerColor());
                     graphics.drawString(timerText, textX, textY);
                 }
             }

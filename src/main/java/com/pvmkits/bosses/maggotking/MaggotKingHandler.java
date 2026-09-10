@@ -5,35 +5,23 @@ import com.pvmkits.core.BossHandler;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
-import net.runelite.api.CollisionData;
-import net.runelite.api.CollisionDataFlag;
 import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
-import net.runelite.api.GroundObject;
 import net.runelite.api.GraphicsObject;
 import net.runelite.api.NPC;
-import net.runelite.api.Point;
 import net.runelite.api.Projectile;
-import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.Prayer;
 import net.runelite.api.events.AnimationChanged;
-import net.runelite.api.events.AreaSoundEffectPlayed;
 import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GraphicChanged;
-import net.runelite.api.events.GroundObjectDespawned;
-import net.runelite.api.events.GroundObjectSpawned;
 import net.runelite.api.events.ProjectileMoved;
-import net.runelite.api.events.SoundEffectPlayed;
 
 import javax.inject.Inject;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -55,7 +43,6 @@ public class MaggotKingHandler implements BossHandler {
     private static final int SPLIT_SPLASH_PERSIST_TICKS = 6;
     private static final int SCREECH_WARNING_TICKS = 4;
     private static final int LOCAL_HAZARD_MAX_DISTANCE = 14;
-    private static final int SLAM_OVERLAY_DECAY_TICKS = 4;
 
     // Client game cycles per game tick (600ms / 20ms), used to convert a
     // projectile's remaining cycles into the game tick it will land on.
@@ -81,11 +68,6 @@ public class MaggotKingHandler implements BossHandler {
     // keep it flagged.
     private static final int SLAM_CHARGEUP_DANGER_TICKS = 3;
     private static final int SLAM_EXPLOSION_DANGER_TICKS = 1;
-
-    // Arena wall game objects. The false "safe" row sits exactly one tile north of
-    // these walls (those tiles read as walkable/hazard-free but are unreachable), so
-    // every tile one north of a wall footprint is excluded from the safe tiles.
-    private static final Set<Integer> WALL_OBJECT_IDS = Set.of(61051, 61052, 61053, 61054, 61055);
 
     // Confirmed boss NPC id (Maggot King). Matching by id keeps larvae (which share
     // the "maggot" naming) from being treated as the boss.
@@ -122,6 +104,14 @@ public class MaggotKingHandler implements BossHandler {
 
         // Player-confirmed: screech (prayer-off) animation. The boss is recoloured
         // while this animation is playing.
+        //
+        // This animation is the ONLY screech cue. Sound effects must never trigger
+        // one: the boss plays ambient/attack sounds (11027, 11821, 11822, 11835-11837,
+        // ...) every 2-3 ticks for the whole fight, so a "any sound near the boss"
+        // cue re-armed the warning window faster than it could expire and pinned the
+        // overlay to the screech colour, hiding the range/mage prayer colour entirely
+        // (live logs: 70 of 72 screech cues were ambient sounds, 2 were real). The
+        // sounds also lag the animation by a tick, so they added no early warning.
         private static final int SCREECH_ANIMATION_ID = 13922;
 
         // Fresh acid pools that deal damage. 33423 = range acid (user-confirmed);
@@ -137,7 +127,6 @@ public class MaggotKingHandler implements BossHandler {
     private final Map<Integer, AttackStyle> bossStyles = new HashMap<>();
 
     // Display style for the overlay — toggled on each screech animation based on the
-    // Display style for the overlay — toggled on each screech animation based on the
     // fixed range→mage→range→... cycle. Never influenced by projectiles.
     private final Map<Integer, AttackStyle> displayAttackStyles = new HashMap<>();
 
@@ -147,11 +136,6 @@ public class MaggotKingHandler implements BossHandler {
 
     private final Map<Integer, Integer> attackCooldowns = new HashMap<>();
     private final Map<Integer, Integer> lastLoggedAnimations = new HashMap<>();
-    private final Map<Integer, Integer> lastLoggedGraphics = new HashMap<>();
-    private final Map<Integer, NpcLogState> npcLogStates = new HashMap<>();
-    private final Map<String, Integer> projectileLastLoggedTick = new HashMap<>();
-    private final Map<String, Integer> graphicsLastSeenTick = new HashMap<>();
-    private final Map<Integer, Integer> areaSoundLastTick = new HashMap<>();
 
     // Active acid pool objects keyed by object hash -> tile, so danger tracks the
     // object's true on-ground lifetime rather than a fixed guess.
@@ -170,22 +154,11 @@ public class MaggotKingHandler implements BossHandler {
     // the tile is free to become safe again.
     private final Map<WorldPoint, Integer> incomingImpactTiles = new HashMap<>();
 
-    // Arena wall footprints keyed by object hash -> the tiles one north of that
-    // wall (the false "safe" row). Tracked from scene-load spawns regardless of
-    // combat state; wallNorthExclusions is the flattened union for O(1) lookup.
-    private final Map<Long, Set<WorldPoint>> wallNorthTilesByHash = new HashMap<>();
-    private final Set<WorldPoint> wallNorthExclusions = new HashSet<>();
-
     // Hazard tile store with expiry and priority. Higher priority means more dangerous.
     private final Map<WorldPoint, HazardTileState> dangerTiles = new HashMap<>();
-    private final Set<WorldPoint> safeTiles = new HashSet<>();
 
     private int screechWarningUntilTick = -1;
     private int screechStartTick = -1;
-
-    // Tracks the tick a slam attack ended. Used to hide the prayer/attack style
-    // overlay during slams and for a brief decay period afterward.
-    private int lastSlamEndTick = -1;
 
     @Override
     public String getBossName() {
@@ -216,7 +189,6 @@ public class MaggotKingHandler implements BossHandler {
     }
 
     @Override
-    @SuppressWarnings("deprecation")
     public void onGraphicChanged(GraphicChanged event) {
         if (client.getGameState() != GameState.LOGGED_IN) {
             return;
@@ -232,21 +204,10 @@ public class MaggotKingHandler implements BossHandler {
             return;
         }
 
+        // Graphics only feed boss discovery. Attack style is driven by confirmed
+        // animation/projectile ids so the overlay never flickers a wrong colour
+        // between attacks.
         rememberDiscoveredBoss(npc);
-
-        int index = npc.getIndex();
-        int graphicId = npc.getGraphic();
-        Integer previousGraphic = lastLoggedGraphics.get(index);
-        if (previousGraphic == null || previousGraphic != graphicId) {
-            lastLoggedGraphics.put(index, graphicId);
-            if (config.maggotKingVerboseLogging()) {
-                log.info("Maggot King (index {}) graphic changed -> {}", index, graphicId);
-            }
-        }
-
-        // Graphics are logged for discovery only. Attack style is driven by
-        // confirmed animation/projectile ids so the overlay never flickers a
-        // wrong colour between attacks.
     }
 
     @Override
@@ -291,12 +252,12 @@ public class MaggotKingHandler implements BossHandler {
                 // that dry into safe carrion. The projectile re-marks this each move,
                 // so even its final landing-tick event only holds the tile through the
                 // damage tick.
-                markDangerTile(landingTile, ticksToLand + 1, HazardPriority.HIGH, "carrion acid landing");
+                markDangerTile(landingTile, ticksToLand + 1, HazardPriority.HIGH);
             } else {
                 // Standard attack: the splat forms a fresh acid pool on landing that
                 // is tracked separately (activeAcidPools) and keeps the tile dangerous
                 // for its true lifetime, so a short pre-landing warning suffices here.
-                markDangerTile(landingTile, SPLIT_SPLASH_PERSIST_TICKS, HazardPriority.HIGH, "split projectile landing");
+                markDangerTile(landingTile, SPLIT_SPLASH_PERSIST_TICKS, HazardPriority.HIGH);
             }
 
             // Record the landing tick so a tile stays dangerous while an orb is
@@ -317,19 +278,6 @@ public class MaggotKingHandler implements BossHandler {
             registerBossAttack(index, "projectile", projectileId,
                     style != null ? style : AttackStyle.UNKNOWN, landingTile);
         }
-
-        if (config.maggotKingVerboseLogging()) {
-            int currentTick = client.getTickCount();
-            String key = projectile.getId() + "@" + landingTile;
-            Integer lastTick = projectileLastLoggedTick.get(key);
-            if (lastTick == null || currentTick - lastTick >= 1) {
-                projectileLastLoggedTick.put(key, currentTick);
-                log.info("Maggot King projectile: id={} landing={} cycle={}",
-                        projectile.getId(),
-                        landingTile,
-                        projectile.getRemainingCycles());
-            }
-        }
     }
 
     @Override
@@ -339,33 +287,16 @@ public class MaggotKingHandler implements BossHandler {
         }
 
         trackedBossIndices.clear();
-        Set<Integer> currentNpcIndices = new HashSet<>();
 
         for (NPC npc : client.getTopLevelWorldView().npcs()) {
-            if (npc == null) {
-                continue;
-            }
-
-            if (config.maggotKingVerboseLogging()) {
-                trackNpcForLogging(npc, currentNpcIndices);
-            }
-
             if (isBossNpcCandidate(npc)) {
                 processBossNpc(npc);
             }
         }
 
-        NPC primaryBoss = getPrimaryBossNpc();
-
         refreshAcidPools();
         refreshSlamDangerTiles();
         refreshDriedAcidTiles();
-        updateSafeTiles(primaryBoss);
-
-        if (config.maggotKingVerboseLogging()) {
-            pruneNpcLogs(currentNpcIndices);
-            logGraphicsObjectsSnapshot();
-        }
 
         cleanupExpiredState();
     }
@@ -388,37 +319,18 @@ public class MaggotKingHandler implements BossHandler {
         displayAttackStyles.clear();
         attackCooldowns.clear();
         lastLoggedAnimations.clear();
-        lastLoggedGraphics.clear();
         activeAcidPools.clear();
         activeDriedAcid.clear();
         incomingImpactTiles.clear();
-        wallNorthTilesByHash.clear();
-        wallNorthExclusions.clear();
         dangerTiles.clear();
-        safeTiles.clear();
-        npcLogStates.clear();
-        projectileLastLoggedTick.clear();
-        graphicsLastSeenTick.clear();
-        areaSoundLastTick.clear();
         screechWarningUntilTick = -1;
         preScreechStyles.clear();
         screechStartTick = -1;
-        lastSlamEndTick = -1;
     }
 
     public void onGameObjectSpawned(GameObjectSpawned event) {
         GameObject object = event.getGameObject();
-        if (object == null) {
-            return;
-        }
-
-        // Walls load with the arena scene, before the boss is detected, so track
-        // them regardless of combat state.
-        if (WALL_OBJECT_IDS.contains(object.getId())) {
-            trackWallObject(object);
-        }
-
-        if (!isCombatCaptureActive()) {
+        if (object == null || !isCombatCaptureActive()) {
             return;
         }
 
@@ -432,7 +344,7 @@ public class MaggotKingHandler implements BossHandler {
                 activeDriedAcid.values().removeIf(location::equals);
                 incomingImpactTiles.remove(location);
                 activeAcidPools.put(object.getHash(), location);
-                markDangerTile(location, ACID_POOL_LINGER_TICKS, HazardPriority.HIGH, "acid pool object");
+                markDangerTile(location, ACID_POOL_LINGER_TICKS, HazardPriority.HIGH);
             } else if (DRIED_ACID_OBJECT_IDS.contains(objectId)) {
                 // Dried acid is safe to stand on. Track it and drop any lingering
                 // danger here (e.g. a split splash pre-landing mark, or the fresh
@@ -445,28 +357,17 @@ public class MaggotKingHandler implements BossHandler {
                 activeDriedAcid.put(object.getHash(), location);
                 incomingImpactTiles.remove(location);
                 dangerTiles.remove(location);
-            }
-        }
 
-        if (config.maggotKingVerboseLogging()) {
-            log.info("Maggot King game object spawn: id={} hash={} at={}",
-                    object.getId(),
-                    object.getHash(),
-                    location);
+                if (config.hideDriedAcid()) {
+                    client.getScene().removeGameObject(object);
+                }
+            }
         }
     }
 
     public void onGameObjectDespawned(GameObjectDespawned event) {
         GameObject object = event.getGameObject();
-        if (object == null) {
-            return;
-        }
-
-        if (wallNorthTilesByHash.remove(object.getHash()) != null) {
-            rebuildWallNorthExclusions();
-        }
-
-        if (!isCombatCaptureActive()) {
+        if (object == null || !isCombatCaptureActive()) {
             return;
         }
 
@@ -482,89 +383,6 @@ public class MaggotKingHandler implements BossHandler {
         } else if (DRIED_ACID_OBJECT_IDS.contains(object.getId())) {
             activeDriedAcid.remove(object.getHash());
         }
-
-        if (config.maggotKingVerboseLogging()) {
-            log.info("Maggot King game object despawn: id={} hash={} at={}",
-                    object.getId(),
-                    object.getHash(),
-                    object.getWorldLocation());
-        }
-    }
-
-    public void onGroundObjectSpawned(GroundObjectSpawned event) {
-        GroundObject object = event.getGroundObject();
-        if (object == null || !isCombatCaptureActive()) {
-            return;
-        }
-
-        if (config.maggotKingVerboseLogging()) {
-            log.info("Maggot King ground object spawn: id={} hash={} at={}",
-                    object.getId(),
-                    object.getHash(),
-                    object.getWorldLocation());
-        }
-    }
-
-    public void onGroundObjectDespawned(GroundObjectDespawned event) {
-        GroundObject object = event.getGroundObject();
-        if (object == null || !isCombatCaptureActive() || !config.maggotKingVerboseLogging()) {
-            return;
-        }
-
-        log.info("Maggot King ground object despawn: id={} hash={} at={}",
-                object.getId(),
-                object.getHash(),
-                object.getWorldLocation());
-    }
-
-    public void onSoundEffectPlayed(SoundEffectPlayed event) {
-        if (!isCombatCaptureActive() || !config.maggotKingVerboseLogging()) {
-            return;
-        }
-
-        Actor source = event.getSource();
-        String sourceName = source != null ? safeName(source.getName()) : "world";
-        boolean bossSourced = source instanceof NPC && isBossNpcCandidate((NPC) source);
-        log.info("Maggot King sound: id={} source={} bossSource={} tick={}",
-                event.getSoundId(),
-                sourceName,
-                bossSourced,
-                client.getTickCount());
-
-        if (bossSourced) {
-            triggerScreechWarning("boss sound", event.getSoundId());
-        }
-    }
-
-    public void onAreaSoundEffectPlayed(AreaSoundEffectPlayed event) {
-        if (!isCombatCaptureActive() || !config.maggotKingVerboseLogging()) {
-            return;
-        }
-
-        NPC boss = getPrimaryBossNpc();
-        int soundId = event.getSoundId();
-        log.info("Maggot King area sound: id={} scene=({}, {}) tick={}",
-                soundId,
-                event.getSceneX(),
-                event.getSceneY(),
-                client.getTickCount());
-
-        if (boss != null) {
-            WorldPoint soundPoint = WorldPoint.fromScene(client, event.getSceneX(), event.getSceneY(), boss.getWorldLocation().getPlane());
-            WorldPoint bossTile = boss.getWorldLocation();
-            Integer lastTick = areaSoundLastTick.get(soundId);
-            int currentTick = client.getTickCount();
-            if (soundPoint != null && bossTile != null
-                    && soundPoint.distanceTo(bossTile) <= 8
-                    && (lastTick == null || currentTick - lastTick >= 2)) {
-                areaSoundLastTick.put(soundId, currentTick);
-                triggerScreechWarning("near-boss area sound", soundId);
-            }
-        }
-    }
-
-    public Collection<WorldPoint> getSafeTiles() {
-        return Collections.unmodifiableSet(safeTiles);
     }
 
     public AttackStyle getBossStyle(int npcIndex) {
@@ -616,14 +434,6 @@ public class MaggotKingHandler implements BossHandler {
         return npc != null && isBossNpcCandidate(npc);
     }
 
-    /**
-     * Returns true if a slam attack is currently active or within the decay period.
-     * This is used to hide the prayer/attack style overlay during slams for better visibility.
-     */
-    public boolean isSlamActive() {
-        return client.getTickCount() < lastSlamEndTick;
-    }
-
     private void processBossNpc(NPC npc) {
         rememberDiscoveredBoss(npc);
 
@@ -648,8 +458,6 @@ public class MaggotKingHandler implements BossHandler {
                     triggerScreechWarning("screech animation", animationId);
                     screechStartTick = client.getTickCount();
                     predictPostScreechStyle(index);
-                    // Clear the slam overlay decay so the predicted prayer displays immediately
-                    lastSlamEndTick = -1;
                     log.info("Maggot King (index {}) animation {} -> SCREECH (turn overhead prayers off)",
                             index, animationId);
                 } else {
@@ -698,109 +506,21 @@ public class MaggotKingHandler implements BossHandler {
         knownIndices.addAll(bossStyles.keySet());
         knownIndices.addAll(attackCooldowns.keySet());
         knownIndices.addAll(lastLoggedAnimations.keySet());
-        knownIndices.addAll(lastLoggedGraphics.keySet());
 
         for (int index : knownIndices) {
             if (!trackedBossIndices.contains(index)) {
                 bossStyles.remove(index);
                 attackCooldowns.remove(index);
                 lastLoggedAnimations.remove(index);
-                lastLoggedGraphics.remove(index);
             }
         }
 
         dangerTiles.entrySet().removeIf(e -> currentTick >= e.getValue().expiryTick);
         incomingImpactTiles.entrySet().removeIf(e -> currentTick > e.getValue());
-        projectileLastLoggedTick.entrySet().removeIf(e -> currentTick - e.getValue() > 8);
-        graphicsLastSeenTick.entrySet().removeIf(e -> currentTick - e.getValue() > 8);
 
         if (trackedBossIndices.isEmpty()) {
             dangerTiles.clear();
-            safeTiles.clear();
             incomingImpactTiles.clear();
-        }
-    }
-
-    @SuppressWarnings("deprecation")
-    private void trackNpcForLogging(NPC npc, Set<Integer> currentNpcIndices) {
-        int index = npc.getIndex();
-        int id = npc.getId();
-        String name = safeName(npc.getName());
-        int animation = npc.getAnimation();
-        int graphic = npc.getGraphic();
-        WorldPoint location = npc.getWorldLocation();
-
-        currentNpcIndices.add(index);
-
-        NpcLogState state = npcLogStates.get(index);
-        if (state == null) {
-            npcLogStates.put(index, new NpcLogState(id, name, animation, graphic));
-            log.info("Maggot King NPC spawn: id={} name={} index={} at={}", id, name, index, location);
-            return;
-        }
-
-        if (state.npcId != id || !state.name.equals(name)) {
-            log.info("Maggot King NPC morph: index={} {}({}) -> {}({}) at={}",
-                    index,
-                    state.name,
-                    state.npcId,
-                    name,
-                    id,
-                    location);
-            state.npcId = id;
-            state.name = name;
-        }
-
-        if (animation != -1 && animation != state.animation) {
-            log.info("Maggot King NPC animation: id={} name={} index={} anim={}", id, name, index, animation);
-        }
-
-        if (graphic != -1 && graphic != state.graphic) {
-            log.info("Maggot King NPC graphic: id={} name={} index={} graphic={}", id, name, index, graphic);
-        }
-
-        state.animation = animation;
-        state.graphic = graphic;
-    }
-
-    private void pruneNpcLogs(Set<Integer> currentNpcIndices) {
-        List<Integer> despawned = new ArrayList<>();
-        for (Map.Entry<Integer, NpcLogState> entry : npcLogStates.entrySet()) {
-            if (!currentNpcIndices.contains(entry.getKey())) {
-                despawned.add(entry.getKey());
-            }
-        }
-
-        for (int index : despawned) {
-            NpcLogState state = npcLogStates.remove(index);
-            if (state != null) {
-                log.info("Maggot King NPC despawn: id={} name={} index={}", state.npcId, state.name, index);
-            }
-        }
-    }
-
-    private void logGraphicsObjectsSnapshot() {
-        int currentTick = client.getTickCount();
-
-        for (GraphicsObject go : client.getGraphicsObjects()) {
-            if (go == null) {
-                continue;
-            }
-
-            LocalPoint local = go.getLocation();
-            WorldPoint world = local != null ? WorldPoint.fromLocal(client, local) : null;
-            String signature = go.getId() + "@" + go.getStartCycle() + "@" + world;
-
-            Integer lastSeen = graphicsLastSeenTick.put(signature, currentTick);
-            if (lastSeen == null) {
-                log.info("Maggot King graphics object: id={} startCycle={} at={}",
-                        go.getId(),
-                        go.getStartCycle(),
-                        world);
-            }
-
-            // Graphics are logged for discovery only; generic graphics are too noisy to
-            // directly treat as danger without verified ids.
         }
     }
 
@@ -832,7 +552,7 @@ public class MaggotKingHandler implements BossHandler {
         return AttackStyle.UNKNOWN;
     }
 
-    private void markDangerTile(WorldPoint tile, int persistTicks, HazardPriority priority, String reason) {
+    private void markDangerTile(WorldPoint tile, int persistTicks, HazardPriority priority) {
         if (tile == null) {
             return;
         }
@@ -848,31 +568,6 @@ public class MaggotKingHandler implements BossHandler {
         if (priority.weight > state.priority.weight) {
             state.priority = priority;
         }
-
-        if (config.maggotKingVerboseLogging() && state.expiryTick == expiry) {
-            log.debug("Maggot King hazard refresh: {} {} priority={} untilTick={}", reason, tile, priority, expiry);
-        }
-    }
-
-    private void updateSafeTiles(NPC boss) {
-        safeTiles.clear();
-
-        WorldPoint playerTile = client.getLocalPlayer() != null ? client.getLocalPlayer().getWorldLocation() : null;
-        if (playerTile == null || dangerTiles.isEmpty()) {
-            return;
-        }
-
-        // Show every walkable, hazard-free tile within two tiles of the player
-        // (including the tile they stand on), recomputed each tick, so they can
-        // step off acid, split splashes or the melee slam square onto safe ground.
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dy = -2; dy <= 2; dy++) {
-                WorldPoint candidate = playerTile.dx(dx).dy(dy);
-                if (isCandidateSafe(candidate, boss)) {
-                    safeTiles.add(candidate);
-                }
-            }
-        }
     }
 
     private void refreshAcidPools() {
@@ -883,7 +578,7 @@ public class MaggotKingHandler implements BossHandler {
         // Re-mark each active acid pool every tick so the hazard tracks the
         // object's true lifetime on the ground, clearing shortly after despawn.
         for (WorldPoint tile : activeAcidPools.values()) {
-            markDangerTile(tile, ACID_POOL_LINGER_TICKS, HazardPriority.HIGH, "acid pool (active)");
+            markDangerTile(tile, ACID_POOL_LINGER_TICKS, HazardPriority.HIGH);
         }
     }
 
@@ -966,13 +661,12 @@ public class MaggotKingHandler implements BossHandler {
      * anchoring frees the tile the tick after the damage lands (mirrors the
      * shadow-hand fix).
      *
-     * Tracks when slams are active to hide the prayer/attack style overlay during
-     * slams and for a decay period afterward.
+     * A slam explosion also confirms a preceding screech was a melee-phase fake, so
+     * the display style is reverted to the range/mage colour shown before it.
      */
     private void refreshSlamDangerTiles() {
         int currentTick = client.getTickCount();
         int gameCycle = client.getGameCycle();
-        boolean slamActive = false;
         boolean slamExplosionActive = false;
 
         for (GraphicsObject graphicsObject : client.getGraphicsObjects()) {
@@ -998,17 +692,11 @@ public class MaggotKingHandler implements BossHandler {
             int expiryTick = startTick + dangerTicks;
 
             if (expiryTick > currentTick) {
-                slamActive = true;
                 if (graphicsObject.getId() == MELEE_SLAM_EXPLOSION_GRAPHIC_ID) {
                     slamExplosionActive = true;
                 }
-                markDangerTile(tile, expiryTick - currentTick, HazardPriority.CRITICAL, "melee slam graphic");
+                markDangerTile(tile, expiryTick - currentTick, HazardPriority.CRITICAL);
             }
-        }
-
-        // Update the last slam end tick if we detected active slam graphics
-        if (slamActive) {
-            lastSlamEndTick = currentTick + SLAM_OVERLAY_DECAY_TICKS;
         }
 
         // If we see a slam EXPLOSION (2953) after a screech, it's definitely a fake screech.
@@ -1023,99 +711,6 @@ public class MaggotKingHandler implements BossHandler {
             preScreechStyles.clear();
             screechStartTick = -1; // Reset it so we don't keep reverting
         }
-    }
-
-    private boolean isCandidateSafe(WorldPoint candidate, NPC boss) {
-        if (candidate == null || dangerTiles.containsKey(candidate)) {
-            return false;
-        }
-
-        // Never treat the walled-off row (one tile north of the arena wall) as safe.
-        if (wallNorthExclusions.contains(candidate)) {
-            return false;
-        }
-
-        LocalPoint local = LocalPoint.fromWorld(client, candidate);
-        if (local == null) {
-            return false;
-        }
-
-        // Keep safe tiles inside the walkable arena (no walls, plants, scenery).
-        if (!isWalkableTile(candidate)) {
-            return false;
-        }
-
-        if (boss != null && boss.getWorldArea() != null && boss.getWorldArea().contains(candidate)) {
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Records the tiles one north of a wall object's footprint so they can be
-     * excluded from the safe-tile search. The footprint is read from the object's
-     * scene min/max (handles multi-tile walls) and converted to the runtime world
-     * coordinates the safe-tile search uses, so it works inside the boss instance.
-     */
-    private void trackWallObject(GameObject wall) {
-        WorldView wv = client.getTopLevelWorldView();
-        WorldPoint base = wall.getWorldLocation();
-        Point min = wall.getSceneMinLocation();
-        Point max = wall.getSceneMaxLocation();
-        if (wv == null || base == null || min == null || max == null) {
-            return;
-        }
-
-        int plane = base.getPlane();
-        Set<WorldPoint> northTiles = new HashSet<>();
-        for (int sceneX = min.getX(); sceneX <= max.getX(); sceneX++) {
-            for (int sceneY = min.getY(); sceneY <= max.getY(); sceneY++) {
-                WorldPoint footprint = new WorldPoint(wv.getBaseX() + sceneX, wv.getBaseY() + sceneY, plane);
-                northTiles.add(footprint.dy(1));
-            }
-        }
-
-        wallNorthTilesByHash.put(wall.getHash(), northTiles);
-        rebuildWallNorthExclusions();
-
-        if (config.maggotKingVerboseLogging()) {
-            log.info("Maggot King wall object: id={} hash={} size={}x{} -> excludes {} tile(s) one north",
-                    wall.getId(), wall.getHash(), wall.sizeX(), wall.sizeY(), northTiles.size());
-        }
-    }
-
-    private void rebuildWallNorthExclusions() {
-        wallNorthExclusions.clear();
-        for (Set<WorldPoint> tiles : wallNorthTilesByHash.values()) {
-            wallNorthExclusions.addAll(tiles);
-        }
-    }
-
-    private boolean isWalkableTile(WorldPoint wp) {
-        WorldView wv = client.getTopLevelWorldView();
-        if (wv == null) {
-            return true;
-        }
-
-        CollisionData[] maps = wv.getCollisionMaps();
-        if (maps == null) {
-            return true;
-        }
-
-        int plane = wp.getPlane();
-        if (plane < 0 || plane >= maps.length || maps[plane] == null) {
-            return true;
-        }
-
-        int sceneX = wp.getX() - wv.getBaseX();
-        int sceneY = wp.getY() - wv.getBaseY();
-        if (sceneX < 0 || sceneY < 0 || sceneX >= 104 || sceneY >= 104) {
-            return false;
-        }
-
-        int flag = maps[plane].getFlags()[sceneX][sceneY];
-        return (flag & CollisionDataFlag.BLOCK_MOVEMENT_FULL) == 0;
     }
 
     /**
@@ -1239,24 +834,6 @@ public class MaggotKingHandler implements BossHandler {
             return "";
         }
         return name.toLowerCase(Locale.ENGLISH);
-    }
-
-    private String safeName(String name) {
-        return name == null ? "unknown" : name;
-    }
-
-    private static class NpcLogState {
-        private int npcId;
-        private String name;
-        private int animation;
-        private int graphic;
-
-        private NpcLogState(int npcId, String name, int animation, int graphic) {
-            this.npcId = npcId;
-            this.name = name;
-            this.animation = animation;
-            this.graphic = graphic;
-        }
     }
 
     private static class HazardTileState {

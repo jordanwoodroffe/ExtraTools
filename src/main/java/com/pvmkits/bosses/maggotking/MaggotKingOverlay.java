@@ -62,9 +62,6 @@ public class MaggotKingOverlay extends Overlay {
             renderLarvaeHighlights(graphics);
         }
 
-        if (config.showMaggotKingSafeTile()) {
-            renderSafeTiles(graphics, handler);
-        }
 
         return null;
     }
@@ -81,11 +78,12 @@ public class MaggotKingOverlay extends Overlay {
 
             Color styleColor;
 
-            // Show screech color during screech warning window
             if (handler.isScreechWarningActive()) {
+                // Show screech color during screech warning window
                 styleColor = config.maggotKingScreechStyleColor();
             } else {
-                // Show attack style color (predicted prayer style)
+                // Show the predicted prayer style. Melee slams never set a colour of
+                // their own, so the last range/mage colour stays up through them.
                 styleColor = getStyleColor(handler, npc.getIndex());
             }
 
@@ -125,8 +123,7 @@ public class MaggotKingOverlay extends Overlay {
             }
         }
 
-        Color color = config.maggotKingScreechColor();
-        graphics.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 240));
+        graphics.setColor(new Color(255, 0, 0, 240));
         graphics.setStroke(new BasicStroke(2));
         graphics.draw(outline);
     }
@@ -154,55 +151,19 @@ public class MaggotKingOverlay extends Overlay {
             return;
         }
 
-        // Draw the NPC hull as an additional cue so targets remain visible in crowds.
-        Shape hull = npc.getConvexHull();
-        if (hull != null) {
-            int hullAlpha = Math.max(20, highlightColor.getAlpha() / 2);
-            graphics.setColor(new Color(highlightColor.getRed(), highlightColor.getGreen(),
-                    highlightColor.getBlue(), hullAlpha));
-            graphics.fill(hull);
-
-            graphics.setColor(new Color(highlightColor.getRed(), highlightColor.getGreen(),
-                    highlightColor.getBlue(), Math.min(255, highlightColor.getAlpha() + 100)));
-            graphics.setStroke(new BasicStroke(1));
-            graphics.draw(hull);
-        }
-
-        // Highlight the tile under the NPC.
-        Polygon tilePoly = Perspective.getCanvasTilePoly(client, npcLocation);
-        if (tilePoly != null) {
+        // Draw a 3x3 tile area so the larvae are easy to spot even though their
+        // model is small. getCanvasTileAreaPoly centres the area on npcLocation.
+        Polygon tileAreaPoly = Perspective.getCanvasTileAreaPoly(client, npcLocation, 3);
+        if (tileAreaPoly != null) {
             graphics.setColor(highlightColor);
-            graphics.fill(tilePoly);
+            graphics.fill(tileAreaPoly);
 
             graphics.setColor(new Color(highlightColor.getRed(), highlightColor.getGreen(),
                     highlightColor.getBlue(), Math.min(255, highlightColor.getAlpha() + 100)));
             graphics.setStroke(new BasicStroke(2));
-            graphics.draw(tilePoly);
+            graphics.draw(tileAreaPoly);
         }
-    }
 
-    private void renderSafeTiles(Graphics2D graphics, MaggotKingHandler handler) {
-        Color safeColor = config.maggotKingSafeTileColor();
-        Color fill = new Color(safeColor.getRed(), safeColor.getGreen(), safeColor.getBlue(), config.maggotKingTransparency());
-
-        for (WorldPoint tile : handler.getSafeTiles()) {
-            LocalPoint local = LocalPoint.fromWorld(client, tile);
-            if (local == null) {
-                continue;
-            }
-
-            Polygon poly = Perspective.getCanvasTilePoly(client, local);
-            if (poly == null) {
-                continue;
-            }
-
-            graphics.setColor(fill);
-            graphics.fill(poly);
-
-            graphics.setColor(safeColor);
-            graphics.setStroke(new BasicStroke(1));
-            graphics.draw(poly);
-        }
     }
 
     /**
@@ -240,7 +201,7 @@ public class MaggotKingOverlay extends Overlay {
         graphics.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), config.maggotKingTransparency()));
         graphics.fill(border);
 
-        graphics.setColor(color);
+        graphics.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), Math.min(255, config.maggotKingTransparency() + 100)));
         graphics.setStroke(new BasicStroke(1));
         graphics.draw(border);
     }

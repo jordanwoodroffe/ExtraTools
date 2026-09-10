@@ -5,6 +5,9 @@ import net.runelite.api.Client;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GraphicChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.HitsplatApplied;
+import net.runelite.api.events.NpcDespawned;
+import net.runelite.api.events.NpcSpawned;
 import net.runelite.api.events.ProjectileMoved;
 
 /**
@@ -37,6 +40,29 @@ public interface BossHandler {
      */
     default void onProjectileMoved(ProjectileMoved event) {
         // Default empty implementation for bosses that don't use projectiles
+    }
+
+    /**
+     * Handle an NPC entering the scene. Used for diagnostics (spotting unrecognised
+     * NPC IDs) and for handlers that track adds.
+     */
+    default void onNpcSpawned(NpcSpawned event) {
+        // Default empty implementation
+    }
+
+    /**
+     * Handle an NPC leaving the scene.
+     */
+    default void onNpcDespawned(NpcDespawned event) {
+        // Default empty implementation
+    }
+
+    /**
+     * Handle a hitsplat. Damage taken is the ground truth for when a boss attack
+     * actually landed, which is what attack timers are validated against.
+     */
+    default void onHitsplatApplied(HitsplatApplied event) {
+        // Default empty implementation
     }
 
     /**

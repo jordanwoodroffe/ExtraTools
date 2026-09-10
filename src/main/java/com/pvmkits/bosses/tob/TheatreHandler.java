@@ -1,35 +1,42 @@
 package com.pvmkits.bosses.tob;
 
-import com.pvmkits.PvmKitsConfig;
 import com.pvmkits.core.BossHandler;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.*;
-import net.runelite.api.coords.LocalPoint;
-import net.runelite.api.coords.WorldArea;
-import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.Actor;
+import net.runelite.api.Client;
+import net.runelite.api.NPC;
+import net.runelite.api.Projectile;
+import net.runelite.api.WorldView;
 import net.runelite.api.events.AnimationChanged;
-import net.runelite.api.events.GraphicChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.GraphicChanged;
 import net.runelite.api.events.ProjectileMoved;
 
 import javax.inject.Inject;
 import java.awt.Color;
-import java.util.*;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
- * Handler for the Theatre of Blood. The whole raid is treated as a single boss;
- * each room contributes its own overlay cues:
- * <ul>
- * <li>Maiden - attack timer</li>
- * <li>Bloat - sleep / wake timer</li>
- * <li>Nylocas - role-based spider highlighting</li>
- * <li>Sotetseg - attack timer</li>
- * <li>Xarpus - nothing</li>
- * <li>Verzik P1/P2/P3 - attack timer (per-phase speed) + P3 attack-style
- * colour</li>
- * </ul>
- * NPC/animation IDs are confirmed normal-mode values from RuneLite's NpcID. The
- * boss attack animations are logged so they can be verified live and refined.
+ * Theatre of Blood helper, covering two rooms.
+ *
+ * <p>
+ * <b>Verzik phase 3.</b> Mirrors the Phosani handler: a per-attack style that
+ * drives a coloured overlay on the boss, plus an attack countdown that holds on
+ * 1 until the attack lands. In P3 Verzik uses all three combat styles as autos -
+ * barbs (range), a blue bolt (magic), and a claw swipe on anything adjacent
+ * (melee) - so the style has to be read off each attack rather than off the
+ * phase. Only range and magic are ever displayed: the melee swipe is instant and
+ * unprayable, so it leaves the previous range/magic colour up instead of
+ * flipping the overlay.
+ * </p>
+ *
+ * <p>
+ * <b>Sotetseg's death ball.</b> A countdown to the tick his big red ball lands,
+ * for teams that tick eat it rather than stacking to split the damage. The two
+ * rooms share a handler because they never share a scene, so their state cannot
+ * collide.
+ * </p>
  */
 @Slf4j
 public class TheatreHandler implements BossHandler {
@@ -37,56 +44,128 @@ public class TheatreHandler implements BossHandler {
     @Inject
     private Client client;
 
-    @Inject
-    private PvmKitsConfig config;
+    // Verzik's P3 ("true form") combat NPC ids, one per raid mode: normal 8374,
+    // entry 10835, hard 10852. Her death-bat ids (8375/10836/10853) are excluded on
+    // purpose - she does not attack while fleeing, so the overlay clears itself.
+    private static final Set<Integer> VERZIK_P3_IDS = Set.of(8374, 10835, 10852);
 
-    // --- Room NPC IDs (normal mode) ---
-    private static final Set<Integer> MAIDEN_IDS = Set.of(8360, 8361, 8362, 8363, 8364, 8365);
-    private static final int BLOAT_ID = 8359;
-    private static final Set<Integer> SOTETSEG_IDS = Set.of(8387, 8388);
-    private static final Set<Integer> XARPUS_IDS = Set.of(8338, 8339, 8340, 8341);
-    private static final Set<Integer> VASILIAS_IDS = Set.of(8354, 8355, 8356, 8357);
-    private static final Set<Integer> VERZIK_P1_IDS = Set.of(8369, 8370, 8371);
-    private static final Set<Integer> VERZIK_P2_IDS = Set.of(8372, 8373);
-    private static final Set<Integer> VERZIK_P3_IDS = Set.of(8374, 8375);
+    // Verzik's room. Used alongside the NPC check so the handler stays active for
+    // the whole fight instead of flapping as she changes NPC id between phases.
+    private static final int VERZIK_REGION = 12611;
 
-    // Small Nylocas by attack style. Grey/melee = Ischyros, green/range =
-    // Toxobolos, blue/mage = Hagios.
-    static final Set<Integer> NYLO_MELEE_IDS = Set.of(8263, 8342, 8345, 8348, 8351, 8381);
-    static final Set<Integer> NYLO_RANGE_IDS = Set.of(8264, 8343, 8346, 8349, 8352, 8382);
-    static final Set<Integer> NYLO_MAGE_IDS = Set.of(8344, 8347, 8350, 8353, 8383);
+    // P3 auto-attack animations. These are the primary style signal. Melee is
+    // recognised only so it can be explicitly ignored rather than falling through
+    // with her specials.
+    private static final int ANIM_P3_MELEE = 8123;
+    private static final int ANIM_P3_MAGE = 8124;
+    private static final int ANIM_P3_RANGE = 8125;
 
-    // Any ToB boss NPC, used to detect that we're in the raid.
-    private static final Set<Integer> ALL_TOB_IDS = new HashSet<>();
-    static {
-        ALL_TOB_IDS.addAll(MAIDEN_IDS);
-        ALL_TOB_IDS.add(BLOAT_ID);
-        ALL_TOB_IDS.addAll(SOTETSEG_IDS);
-        ALL_TOB_IDS.addAll(XARPUS_IDS);
-        ALL_TOB_IDS.addAll(VASILIAS_IDS);
-        ALL_TOB_IDS.addAll(VERZIK_P1_IDS);
-        ALL_TOB_IDS.addAll(VERZIK_P2_IDS);
-        ALL_TOB_IDS.addAll(VERZIK_P3_IDS);
-    }
+    // P3 attack projectiles, launched on the same tick as the animation above.
+    // These are the authoritative "she attacked" signal: polling the animation
+    // alone misses back-to-back attacks in the same style, because the animation
+    // never returns to idle between them for the countdown to see a fresh start.
+    private static final int PROJECTILE_P3_RANGE = 1593;
+    private static final int PROJECTILE_P3_MAGE = 1594;
 
-    // --- Attack cycle lengths (game ticks) ---
-    private static final int SOTETSEG_CYCLE = 5;
-    private static final int VERZIK_P1_CYCLE = 10;
-    private static final int VERZIK_P2_CYCLE = 4;
-    private static final int VERZIK_P3_CYCLE = 7; // starting cadence; speeds up, re-synced on each attack
+    // Her attack cadence, in game ticks. At 20% health she enrages: her attacks
+    // speed up and she summons a tornado per player.
+    private static final int P3_CYCLE = 7;
+    private static final int P3_ENRAGE_CYCLE = 5;
+    private static final int ENRAGE_HEALTH_PERCENT = 20;
 
-    public enum Room {
-        NONE, MAIDEN, BLOAT, NYLOCAS, SOTETSEG, XARPUS, VERZIK
-    }
+    // The enrage tornado, internally a "creeper" - it shares its swirling model with
+    // Sotetseg's chasing vortex. One spawns per player only once she is enraged, so
+    // it is a clean enrage cue that does not need her health bar on screen. One id
+    // per raid mode: normal 8386, hard 10863.
+    private static final Set<Integer> TORNADO_NPC_IDS = Set.of(8386, 10863);
 
-    public enum NyloRole {
-        OFF, MELEE, RANGE, MAGE
-    }
+    // The only animations that re-arm the countdown. Her specials - webs (8127)
+    // and yellow pools (8126) - and her transform and death animations all start
+    // mid-cycle, so counting any animation start as an attack re-synced the
+    // countdown to something that was not an attack.
+    private static final Set<Integer> P3_AUTO_ANIMATIONS = Set.of(ANIM_P3_MELEE, ANIM_P3_MAGE, ANIM_P3_RANGE);
 
-    // Verzik P3 attack style, mirrors the Phosani style colours.
+    // How much sooner than her cadence a second detection can arrive and still be
+    // taken as a new attack. Everything inside that window is an echo of the attack
+    // just handled: the other detection path seeing it a tick later, or another of
+    // the barbs a ranged volley puts in the air. Her fastest cadence is 5 ticks, so
+    // one tick of slack never drops a real attack.
+    private static final int ATTACK_ECHO_SLACK_TICKS = 1;
+
+    // Sotetseg's NPC ids: a non-combat and a combat id he swaps between as players
+    // are pulled into the shadow realm, so both are accepted for the countdown to
+    // survive a maze. Two per raid mode: normal 8387/8388, hard 10867/10868.
+    private static final Set<Integer> SOTETSEG_IDS = Set.of(8387, 8388, 10867, 10868);
+
+    // Sotetseg's "death ball" - the big red orb he throws at one player after his
+    // tenth projectile. The team either stacks on the target to split it across a
+    // 3x3, or the target tick eats it.
+    private static final int PROJECTILE_SOTETSEG_BALL = 1604;
+
+    // Client cycles per game tick (600ms / 20ms). Converts the ball's remaining
+    // flight into the game tick it lands on.
+    private static final int CYCLES_PER_GAME_TICK = 30;
+
+    // Ball flight length in ticks: launched on tick 0, lands on tick 10. Only a
+    // fallback - the countdown is normally read from the projectile's own end
+    // cycle, which is authoritative and is logged on every launch. Jagex made the
+    // flight time distance-independent (the projectile's speed scales to
+    // compensate), so a fixed number is a safe backstop.
+    private static final int BALL_FLIGHT_TICKS_FALLBACK = 10;
+
+    // Verzik's phase 2 combat NPC ids, one per raid mode: normal 8372, story 10833,
+    // hard 10850. Her phase-transition ids are excluded - she does not attack on a
+    // cadence while morphing between phases.
+    private static final Set<Integer> VERZIK_P2_IDS = Set.of(8372, 10833, 10850);
+
+    // Verzik's phase 2 mage attack: the blood spell she casts below 35% health, whose
+    // damage lands on the cast animation (pray Magic). Her ranged urnbombs deal their
+    // damage on landing instead, so they have no attack animation and are tracked by
+    // projectile below; her body slam is an off-cadence proximity punish, left out.
+    private static final int ANIM_P2_ATTACK_MAGIC = 8114;
+    private static final Set<Integer> P2_ATTACK_ANIMATIONS = Set.of(ANIM_P2_ATTACK_MAGIC);
+
+    // Verzik's phase 2 urnbomb - her ranged auto through the whole phase (pray
+    // Missiles). Aimed at each player's tile and dealing its damage on landing, it
+    // has no attack animation to poll, so its projectile is what re-arms the timer.
+    private static final Set<Integer> VERZIK_P2_ATTACK_PROJECTILE_IDS = Set.of(1583);
+
+    // Verzik's phase 2 attack cadence, in game ticks.
+    private static final int P2_CYCLE = 4;
+
+    // The raw countdown value (ticks until her attack lands) on the tick players
+    // step back for Verzik's P2 attack. The display is rotated so this value reads
+    // 1 - the highlighted tick - so the countdown reaches 1 on the step back rather
+    // than one tick before the hit. Two ticks before the attack lands.
+    private static final int P2_STEP_BACK_TICK = 2;
+
+    // Xarpus's combat NPC ids - his poison-spit phase, one per raid mode: normal
+    // 8340, story 10768, hard 10772. His earlier static/feeding ids only heal off
+    // the exhumes and never attack, so they are excluded.
+    private static final Set<Integer> XARPUS_COMBAT_IDS = Set.of(8340, 10768, 10772);
+
+    // Xarpus's poison-spit animation, his only attack on the cadence.
+    private static final int ANIM_XARPUS_SPIT = 8059;
+    private static final Set<Integer> XARPUS_ATTACK_ANIMATIONS = Set.of(ANIM_XARPUS_SPIT);
+
+    // Xarpus's attack cadence, in game ticks.
+    private static final int XARPUS_CYCLE = 4;
+
+    // The raw countdown value (ticks until his spit lands) on the tick players step
+    // back for Xarpus's poison spit. The display is rotated so this value reads 1 -
+    // the highlighted tick - so the countdown reaches 1 on the step back rather than
+    // one tick before the hit. Three ticks before the spit lands.
+    private static final int XARPUS_STEP_BACK_TICK = 3;
+
+    /**
+     * Verzik's P3 prayable attack style. There is deliberately no melee value -
+     * her claw swipe is instant and cannot be prayed against, so it never becomes
+     * a displayed style.
+     */
     public enum VerzikStyle {
-        UNKNOWN(Color.GRAY), MELEE(new Color(240, 100, 100, 120)), RANGE(new Color(144, 238, 144)), MAGE(
-                new Color(100, 149, 237));
+        UNKNOWN(Color.GRAY),
+        RANGE(new Color(144, 238, 144)),
+        MAGE(new Color(100, 149, 237));
 
         private final Color color;
 
@@ -99,45 +178,62 @@ public class TheatreHandler implements BossHandler {
         }
     }
 
-    private Room currentRoom = Room.NONE;
-    private int verzikPhase = 0; // 1, 2 or 3 when in the Verzik room
-
-    // Single boss attack countdown shown over the current room's boss.
-    private int bossAttackTimer = -1;
-    // Phosani-style sync: hold at 1 until the attack lands, then reset. Tracks the
-    // current boss's last animation to detect that attack, with a backstop so a
-    // missed anim still re-arms the timer.
-    private int lastBossAttackAnim = -1;
-    private int bossTimerHeldTicks = 0;
-    // Verzik P3 speeds up (enrage) near the end of the kill, so her cadence is
-    // measured live from the interval between attacks rather than fixed at 7.
-    private int verzikP3Cycle = VERZIK_P3_CYCLE;
-    private int lastBossAttackTick = -1;
-
-    // Bloat sleep tracking: true while down/asleep. Timer counts the room's known
-    // state (ticks until wake while asleep, ticks until sleep while awake).
-    private boolean bloatAsleep = false;
-    private int bloatStateTimer = -1;
-    // Bloat is down ~9.6s (16 ticks) and walks ~9 ticks between naps (refined live
-    // off observed transitions).
-    private static final int BLOAT_DOWN_TICKS = 16;
-    private static final int BLOAT_UP_TICKS = 9;
-
+    private boolean verzikP3Active = false;
     private VerzikStyle verzikStyle = VerzikStyle.UNKNOWN;
 
-    // Verzik P3 attack-style projectiles (best-effort; logged for confirmation).
-    private static final int VERZIK_P3_RANGE_PROJECTILE = 1583;
-    private static final int VERZIK_P3_MAGE_PROJECTILE = 1585;
+    // Latched once she enrages, so a tornado despawning or her health bar dropping
+    // out of view cannot flip the cadence back to the slower one mid-fight.
+    private boolean enraged = false;
 
-    // Animation logging dedupe per boss index.
-    private final Map<Integer, Integer> lastLoggedAnimations = new HashMap<>();
-    private int lastBloatAnimation = -1;
+    // Attack countdown. Counts down to 1, holds there until the attack actually
+    // lands, then re-arms on the cycle length - so the hit lands on the reset
+    // number. A backstop re-arms it if an attack is ever missed entirely.
+    private int attackTimer = -1;
+    private int timerHeldTicks = 0;
+    private int lastAnimation = -1;
+    private int lastAttackTick = -1;
 
-    // Bloat safe-tile assist. Tiles hidden from Bloat's line of sight (behind the
-    // pillar) with no falling hand are safe to stand on while he is awake.
-    private static final int BLOAT_LOS_RADIUS = 9;
-    private final List<WorldPoint> bloatSafeTiles = new ArrayList<>();
-    private final List<WorldPoint> bloatHandTiles = new ArrayList<>();
+    // Set by an attack projectile launched this tick and consumed by the next
+    // onGameTick. Deduped on start cycle: one attack fires a projectile per player
+    // in the room, and each stays in flight for several ticks.
+    private boolean projectileAttackPending = false;
+
+    // Highest start cycle already counted as an attack - not merely the last one
+    // seen. See onProjectileMoved.
+    private int lastProjectileStartCycle = -1;
+
+    // Her NPC as of the last game tick. Held so the projectile path can check a
+    // projectile is hers without rescanning the NPC list, which it would otherwise
+    // do once per client cycle per projectile in flight.
+    private NPC verzikNpc = null;
+
+    // Ids seen in her room that this handler does not recognise, logged once each
+    // per fight. A wrong or missing id then shows up in client.log as a line here,
+    // rather than as a countdown that quietly mistimes.
+    private final Set<Integer> loggedUnknownAnimations = new HashSet<>();
+    private final Set<Integer> loggedUnknownProjectiles = new HashSet<>();
+
+    // Absolute game tick Sotetseg's death ball lands on, which is also the tick to
+    // eat on. Held as an absolute tick rather than a decrementing counter so the
+    // countdown cannot drift if a tick is ever missed. -1 when no ball is airborne.
+    private int ballImpactTick = -1;
+    private int lastBallStartCycle = -1;
+
+    // Flight length of the airborne ball in ticks, captured at launch. Used as the
+    // full value of the inventory pie timer so the wheel drains from full to empty.
+    // -1 when no ball is airborne.
+    private int ballFlightTicks = -1;
+
+    // Client game cycle of the last game tick, for getGameTickFraction() (smooth pie).
+    private int lastGameTickCycle = -1;
+
+    // Verzik phase 2 and Xarpus attack countdowns. Both are fixed-cadence attackers
+    // read off a single auto animation, so they share the simple countdown below
+    // rather than the fuller P3 machinery (projectiles, enrage, attack style).
+    private final AttackCountdown verzikP2Countdown = new AttackCountdown("Verzik P2", P2_ATTACK_ANIMATIONS,
+            VERZIK_P2_ATTACK_PROJECTILE_IDS, P2_CYCLE, P2_STEP_BACK_TICK);
+    private final AttackCountdown xarpusCountdown = new AttackCountdown("Xarpus", XARPUS_ATTACK_ANIMATIONS,
+            Set.of(), XARPUS_CYCLE, XARPUS_STEP_BACK_TICK);
 
     @Override
     public String getBossName() {
@@ -146,41 +242,154 @@ public class TheatreHandler implements BossHandler {
 
     @Override
     public boolean isInBossArea(Client client) {
-        for (NPC npc : client.getTopLevelWorldView().npcs()) {
-            if (npc != null && ALL_TOB_IDS.contains(npc.getId())) {
-                return true;
-            }
-        }
-        return false;
+        return inVerzikRegion() || findVerzikP3() != null || findXarpus() != null || findSotetseg() != null;
     }
 
     @Override
     public void onAnimationChanged(AnimationChanged event) {
-        // Animation polling handled in onGameTick.
+        // Animations are polled in onGameTick so the attack timer and the style
+        // update on the same tick boundary.
     }
 
     @Override
     public void onGraphicChanged(GraphicChanged event) {
-        // Not used; style detection uses projectiles + animation.
+        // Verzik's P3 style is carried by her animation and projectiles.
     }
 
+    /**
+     * Primary attack detection. Every range/magic auto launches one of these, so
+     * unlike the animation poll it also catches consecutive attacks in the same
+     * style - which is what the countdown needs to stay in sync once she enrages.
+     */
     @Override
     public void onProjectileMoved(ProjectileMoved event) {
-        if (currentRoom != Room.VERZIK || verzikPhase != 3) {
+        Projectile projectile = event.getProjectile();
+        if (projectile == null) {
             return;
         }
-        int id = event.getProjectile().getId();
-        if (id == VERZIK_P3_RANGE_PROJECTILE) {
-            setVerzikStyle(VerzikStyle.RANGE, "projectile " + id);
-        } else if (id == VERZIK_P3_MAGE_PROJECTILE) {
-            setVerzikStyle(VerzikStyle.MAGE, "projectile " + id);
+
+        // Sotetseg's ball is checked ahead of the Verzik guard - it is the one
+        // mechanic this handler follows outside her room.
+        if (projectile.getId() == PROJECTILE_SOTETSEG_BALL) {
+            onDeathBallLaunched(projectile);
+            return;
+        }
+
+        // Verzik's P2 urnbomb re-arms her P2 countdown. It lands for damage and has no
+        // attack animation, so its projectile is the signal.
+        if (verzikP2Countdown.onProjectile(projectile)) {
+            return;
+        }
+
+        if (!verzikP3Active) {
+            return;
+        }
+
+        // The event re-fires every client cycle a projectile is airborne, so only a
+        // launch from this tick can be a new attack. Her barbs cross the room over
+        // several ticks, which is long enough for an old one to keep arriving here
+        // as though it had just been fired.
+        if (client.getGameCycle() - projectile.getStartCycle() > CYCLES_PER_GAME_TICK) {
+            return;
+        }
+
+        // Start cycles only ever increase, so this is a watermark check rather than
+        // an equality check: anything at or below the newest cycle already counted
+        // belongs to an attack that has been handled. Comparing against the last
+        // cycle *seen* is what desynced her ranged cycle - a volley puts several
+        // barbs in the air at once, and two with different start cycles each looked
+        // new to the other on every client cycle, leaving an attack permanently
+        // pending and re-arming the countdown partway through the cycle. Her magic
+        // attack is a single bolt, so it had nothing to alternate with and stayed in
+        // sync.
+        if (projectile.getStartCycle() <= lastProjectileStartCycle) {
+            return;
+        }
+
+        // Her nylocas spawns share the room and shoot too. Projectiles the client
+        // does not attribute to anyone are still accepted - dropping those would
+        // cost this path the back-to-back attacks it exists to catch.
+        Actor sourceActor = projectile.getSourceActor();
+        if (sourceActor != null && verzikNpc != null && sourceActor != verzikNpc) {
+            return;
+        }
+
+        VerzikStyle style;
+        if (projectile.getId() == PROJECTILE_P3_RANGE) {
+            style = VerzikStyle.RANGE;
+        } else if (projectile.getId() == PROJECTILE_P3_MAGE) {
+            style = VerzikStyle.MAGE;
+        } else {
+            logUnknownId(loggedUnknownProjectiles, projectile.getId(), "unrecognised projectile");
+            return;
+        }
+
+        lastProjectileStartCycle = projectile.getStartCycle();
+        projectileAttackPending = true;
+        setStyle(style, "projectile");
+    }
+
+    /**
+     * Logs an id seen during P3 that the countdown deliberately ignores, once per id
+     * per fight. Her specials show up here as expected; anything unexpected is an id
+     * that needs correcting, which is otherwise only visible as a countdown that
+     * quietly mistimes.
+     */
+    private void logUnknownId(Set<Integer> alreadyLogged, int id, String kind) {
+        if (alreadyLogged.add(id)) {
+            log.info("Verzik P3 {} id {} not counted as an attack", kind, id);
         }
     }
 
-    private void setVerzikStyle(VerzikStyle style, String source) {
-        if (verzikStyle != style) {
-            verzikStyle = style;
-            log.info("Verzik P3 style -> " + style + " via " + source);
+    /**
+     * Starts the death ball countdown. The tick it lands on is taken from the
+     * projectile's own end cycle rather than a hardcoded flight length, so the
+     * count is exact even if the timing is ever changed.
+     */
+    private void onDeathBallLaunched(Projectile projectile) {
+        // Re-fires every client cycle the ball is airborne, and hard mode throws
+        // two at once - the launch cycle they share identifies the volley exactly
+        // once.
+        if (projectile.getStartCycle() == lastBallStartCycle) {
+            return;
+        }
+        lastBallStartCycle = projectile.getStartCycle();
+
+        int remainingCycles = projectile.getRemainingCycles();
+        // The flight is not a whole number of ticks (e.g. 457 cycles = 15.23), so
+        // round to the nearest tick - ceil landed the count a tick late.
+        int flightTicks = remainingCycles > 0
+                ? (int) Math.round(remainingCycles / (double) CYCLES_PER_GAME_TICK)
+                : BALL_FLIGHT_TICKS_FALLBACK;
+
+        // Both terms are read at the same instant, so this lands on the right tick
+        // whether the projectile event arrived before or after this tick's counter
+        // increment - which a plain "count down from N" would not.
+        int impactTick = client.getTickCount() + flightTicks;
+
+        // Hard mode's second ball is launched on the same tick and lands on the
+        // same tick; if that ever stopped holding, the earlier one is the one worth
+        // counting down to.
+        if (ballImpactTick >= 0 && ballImpactTick <= impactTick) {
+            return;
+        }
+        ballImpactTick = impactTick;
+        ballFlightTicks = flightTicks;
+        log.info("Sotetseg death ball launched - lands in {} ticks ({} cycles), eat on 0",
+                flightTicks, remainingCycles);
+    }
+
+    /**
+     * Clears the death ball countdown once it has been on 0 for its tick, or if
+     * Sotetseg leaves the scene mid-flight, so it cannot freeze on screen.
+     */
+    private void updateDeathBallTimer() {
+        if (ballImpactTick < 0) {
+            return;
+        }
+        if (client.getTickCount() > ballImpactTick || findSotetseg() == null) {
+            ballImpactTick = -1;
+            ballFlightTicks = -1;
         }
     }
 
@@ -190,259 +399,185 @@ public class TheatreHandler implements BossHandler {
             return;
         }
 
-        Room room = detectRoom();
-        if (room != currentRoom) {
-            log.info("ToB room: {} -> {}", currentRoom, room);
-            currentRoom = room;
-            bossAttackTimer = -1;
-            bossTimerHeldTicks = 0;
-            lastBossAttackAnim = -1;
-            lastBossAttackTick = -1;
-            verzikP3Cycle = VERZIK_P3_CYCLE;
-            bloatAsleep = false;
-            bloatStateTimer = -1;
-            verzikStyle = VerzikStyle.UNKNOWN;
-            bloatSafeTiles.clear();
-            bloatHandTiles.clear();
-        }
-
-        switch (room) {
-            case MAIDEN:
-                bossAttackTimer = -1;
-                break;
-            case SOTETSEG:
-                tickBossTimer(SOTETSEG_CYCLE);
-                break;
-            case NYLOCAS:
-                bossAttackTimer = -1;
-                break;
-            case VERZIK:
-                updateVerzik();
-                break;
-            case BLOAT:
-                updateBloat();
-                break;
-            default:
-                bossAttackTimer = -1;
-                break;
-        }
-    }
-
-    private Room detectRoom() {
-        if (findBoss(MAIDEN_IDS) != null) {
-            return Room.MAIDEN;
-        }
-        if (findBoss(Set.of(BLOAT_ID)) != null) {
-            return Room.BLOAT;
-        }
-        if (findBoss(VASILIAS_IDS) != null || findAnyNylo() != null) {
-            return Room.NYLOCAS;
-        }
-        if (findBoss(SOTETSEG_IDS) != null) {
-            return Room.SOTETSEG;
-        }
-        if (findBoss(XARPUS_IDS) != null) {
-            return Room.XARPUS;
-        }
-        if (findBoss(VERZIK_P1_IDS) != null || findBoss(VERZIK_P2_IDS) != null || findBoss(VERZIK_P3_IDS) != null) {
-            return Room.VERZIK;
-        }
-        return Room.NONE;
-    }
-
-    // Generic free-running attack countdown that re-arms each cycle. Logs the
-    // boss's animations so attack timings can be verified live.
-    // Phosani-style attack countdown: count down to 1, hold at 1 (the warning
-    // tick), and reset to the cycle the moment the boss attacks - so the hit lands
-    // on the reset number (4/5/6 depending on speed). A backstop reset keeps it
-    // moving if the attack animation is missed.
-    private void tickBossTimer(int cycle) {
-        NPC boss = getCurrentBoss();
-        boolean attacked = false;
-        if (boss != null) {
-            logAnim(boss);
-            int anim = boss.getAnimation();
-            if (anim != -1 && anim != lastBossAttackAnim) {
-                attacked = true; // animation changed to an attack pose -> re-sync
-            }
-            lastBossAttackAnim = anim;
-        }
-
-        if (attacked) {
-            // Measure Verzik P3's live cadence so the enrage speed-up is tracked.
-            if (currentRoom == Room.VERZIK && verzikPhase == 3 && lastBossAttackTick > 0) {
-                int interval = client.getTickCount() - lastBossAttackTick;
-                if (interval >= 3 && interval <= VERZIK_P3_CYCLE) {
-                    if (interval != verzikP3Cycle) {
-                        log.info("Verzik P3 cadence -> {}t", interval);
-                    }
-                    verzikP3Cycle = interval;
-                }
-            }
-            lastBossAttackTick = client.getTickCount();
-        }
-
-        if (bossAttackTimer <= 0) {
-            bossAttackTimer = cycle;
-            bossTimerHeldTicks = 0;
-        } else if (attacked) {
-            bossAttackTimer = cycle; // attack landed; re-arm on the cycle number
-            bossTimerHeldTicks = 0;
-        } else if (bossAttackTimer > 1) {
-            bossAttackTimer--;
-        } else {
-            // Hold at 1 (red warning) until the attack lands; back off after a full
-            // cycle in case the animation was missed.
-            if (++bossTimerHeldTicks >= cycle) {
-                bossAttackTimer = cycle;
-                bossTimerHeldTicks = 0;
-            }
-        }
+        lastGameTickCycle = client.getGameCycle();
+        updateDeathBallTimer();
+        updateVerzik();
+        verzikP2Countdown.update(findVerzikP2());
+        xarpusCountdown.update(findXarpus());
     }
 
     private void updateVerzik() {
-        int newPhase = 3;
-        if (findBoss(VERZIK_P1_IDS) != null) {
-            newPhase = 1;
-        } else if (findBoss(VERZIK_P2_IDS) != null) {
-            newPhase = 2;
-        }
-        if (newPhase != verzikPhase) {
-            verzikPhase = newPhase;
-            bossAttackTimer = -1;
-            bossTimerHeldTicks = 0;
-            lastBossAttackAnim = -1;
-            lastBossAttackTick = -1;
-            verzikP3Cycle = VERZIK_P3_CYCLE;
-            verzikStyle = VerzikStyle.UNKNOWN;
-            log.info("Verzik phase -> P{}", verzikPhase);
-        }
-
-        int cycle = verzikPhase == 1 ? VERZIK_P1_CYCLE : (verzikPhase == 2 ? VERZIK_P2_CYCLE : verzikP3Cycle);
-        tickBossTimer(cycle);
-    }
-
-    private void updateBloat() {
-        NPC bloat = findBoss(Set.of(BLOAT_ID));
-        if (bloat == null) {
+        NPC verzik = findVerzikP3();
+        verzikNpc = verzik;
+        if (verzik == null) {
+            if (verzikP3Active) {
+                verzikP3Active = false;
+                log.info("Verzik P3 ended");
+                resetFightState();
+            }
             return;
         }
-        int anim = bloat.getAnimation();
-        if (anim != lastBloatAnimation) {
-            log.info("Bloat animation: {}", anim);
-            lastBloatAnimation = anim;
+        if (!verzikP3Active) {
+            verzikP3Active = true;
+            log.info("Verzik P3 started");
+            resetFightState();
         }
-        // Bloat is "asleep" (vulnerable, no walk animation) when idle; awake while
-        // walking. -1 idle is treated as down.
-        boolean asleepNow = anim == -1;
-        if (asleepNow != bloatAsleep) {
-            bloatAsleep = asleepNow;
-            bloatStateTimer = bloatAsleep ? BLOAT_DOWN_TICKS : BLOAT_UP_TICKS;
-        } else if (bloatStateTimer > 0) {
-            bloatStateTimer--;
+
+        updateEnrage(verzik);
+        int cycle = enraged ? P3_ENRAGE_CYCLE : P3_CYCLE;
+
+        // An animation start is the only signal available for her melee swipe,
+        // which fires no projectile. lastAnimation tracks the idle (-1) frames too,
+        // so a repeat of the same animation still reads as a fresh start.
+        int animation = verzik.getAnimation();
+        boolean animationStarted = animation != -1 && animation != lastAnimation;
+        lastAnimation = animation;
+        boolean autoStarted = false;
+        if (animationStarted) {
+            updateStyle(animation);
+            autoStarted = P3_AUTO_ANIMATIONS.contains(animation);
+            if (!autoStarted) {
+                logUnknownId(loggedUnknownAnimations, animation, "non-auto animation");
+            }
+        }
+
+        // Only her autos re-arm the countdown. A special starting mid-cycle is not
+        // an attack on the cycle, so it must not re-sync it.
+        boolean attacked = autoStarted || projectileAttackPending;
+        String source = autoStarted ? "animation " + animation : "projectile";
+        projectileAttackPending = false;
+
+        // A detection inside her cadence is an echo of the attack just handled
+        // rather than a new one: the two paths see the same attack up to a tick
+        // apart, and a ranged volley launches more than one barb. Measuring against
+        // the cadence rather than a flat three ticks is what keeps those echoes from
+        // re-arming the countdown before she has actually attacked again.
+        int tick = client.getTickCount();
+        int sinceLastAttack = lastAttackTick > 0 ? tick - lastAttackTick : -1;
+        if (attacked && sinceLastAttack >= 0 && sinceLastAttack < cycle - ATTACK_ECHO_SLACK_TICKS) {
+            log.info("Verzik P3 attack ignored ({}) - {}t since the last one, cadence is {}t",
+                    source, sinceLastAttack, cycle);
+            attacked = false;
+        }
+        if (attacked) {
+            log.info("Verzik P3 attack: {}, style {}, {}t since her last - countdown -> {}",
+                    source, verzikStyle, sinceLastAttack, cycle);
+            lastAttackTick = tick;
+        }
+
+        if (attackTimer <= 0 || attacked) {
+            attackTimer = cycle;
+            timerHeldTicks = 0;
+        } else if (attackTimer > cycle) {
+            // Cadence just shortened under a running countdown - drop straight to
+            // the new cycle rather than counting down from the old, longer one.
+            attackTimer = cycle;
+        } else if (attackTimer > 1) {
+            attackTimer--;
+        } else if (++timerHeldTicks >= cycle) {
+            // Held on 1 for a full cycle with no attack detected - re-arm so the
+            // countdown keeps running instead of sticking on the warning tick.
+            attackTimer = cycle;
+            timerHeldTicks = 0;
+        }
+    }
+
+    /**
+     * At 20% health Verzik enrages, speeding her attacks up and summoning a
+     * tornado per player. The tornadoes are the more reliable of the two signals -
+     * her health bar only reports a ratio while it is on screen - so either one
+     * latches the enrage for the rest of the phase.
+     */
+    private void updateEnrage(NPC verzik) {
+        if (enraged) {
+            return;
+        }
+
+        String source;
+        if (tornadoesPresent()) {
+            source = "tornadoes spawned";
+        } else if (healthAtOrBelowPercent(verzik, ENRAGE_HEALTH_PERCENT)) {
+            source = "health <= " + ENRAGE_HEALTH_PERCENT + "%";
         } else {
-            bloatStateTimer = bloatAsleep ? BLOAT_DOWN_TICKS : BLOAT_UP_TICKS;
-        }
-
-        computeBloatSafeTiles(bloat);
-    }
-
-    // Falling-hand danger tiles are tracked as graphics objects on the floor.
-    private void collectBloatHandTiles() {
-        bloatHandTiles.clear();
-        for (GraphicsObject go : client.getGraphicsObjects()) {
-            if (go == null) {
-                continue;
-            }
-            LocalPoint lp = go.getLocation();
-            if (lp == null) {
-                continue;
-            }
-            bloatHandTiles.add(WorldPoint.fromLocal(client, lp));
-        }
-    }
-
-    // A safe tile is reachable, hidden from Bloat's line of sight (pillar-blocked)
-    // and free of a falling hand. Only tiles directly bordering the pillar are
-    // kept - that wall-hugging row is where you hide as he circles. Bloat is awake
-    // while walking, so only assist then; while he is down the whole room is fair
-    // game to attack.
-    private void computeBloatSafeTiles(NPC bloat) {
-        collectBloatHandTiles();
-        bloatSafeTiles.clear();
-        if (bloatAsleep) {
             return;
         }
-        WorldView wv = client.getTopLevelWorldView();
-        WorldArea bloatArea = bloat.getWorldArea();
-        WorldPoint base = bloat.getWorldLocation();
-        if (bloatArea == null || base == null) {
-            return;
-        }
-        Set<WorldPoint> hands = new HashSet<>(bloatHandTiles);
-        for (int dx = -BLOAT_LOS_RADIUS; dx <= BLOAT_LOS_RADIUS; dx++) {
-            for (int dy = -BLOAT_LOS_RADIUS; dy <= BLOAT_LOS_RADIUS; dy++) {
-                WorldPoint wp = new WorldPoint(base.getX() + dx, base.getY() + dy, base.getPlane());
-                if (isBlockedTile(wv, wp) || hands.contains(wp)) {
-                    continue;
-                }
-                // Keep only tiles hugging the pillar wall, never open-floor tiles.
-                if (!bordersPillar(wv, wp)) {
-                    continue;
-                }
-                if (!bloatArea.hasLineOfSightTo(wv, new WorldArea(wp, 1, 1))) {
-                    bloatSafeTiles.add(wp);
-                }
-            }
-        }
+
+        enraged = true;
+        log.info("Verzik P3 enraged ({}) - attack cycle {} -> {} ticks",
+                source, P3_CYCLE, P3_ENRAGE_CYCLE);
     }
 
-    // True if any of the 8 neighbours is a blocked pillar tile.
-    private boolean bordersPillar(WorldView wv, WorldPoint wp) {
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                if (dx == 0 && dy == 0) {
-                    continue;
-                }
-                if (isBlockedTile(wv, new WorldPoint(wp.getX() + dx, wp.getY() + dy, wp.getPlane()))) {
-                    return true;
-                }
+    private boolean tornadoesPresent() {
+        WorldView worldView = client.getTopLevelWorldView();
+        if (worldView == null) {
+            return false;
+        }
+        for (NPC npc : worldView.npcs()) {
+            if (npc != null && TORNADO_NPC_IDS.contains(npc.getId())) {
+                return true;
             }
         }
         return false;
     }
 
-    private boolean isBlockedTile(WorldView wv, WorldPoint wp) {
-        CollisionData[] maps = wv.getCollisionMaps();
-        if (maps == null) {
+    private boolean healthAtOrBelowPercent(NPC verzik, int percent) {
+        int ratio = verzik.getHealthRatio();
+        int scale = verzik.getHealthScale();
+        // Both are -1 whenever her health bar is not currently displayed.
+        if (ratio < 0 || scale <= 0) {
             return false;
         }
-        int plane = wp.getPlane();
-        if (plane < 0 || plane >= maps.length || maps[plane] == null) {
-            return false;
-        }
-        int sceneX = wp.getX() - wv.getBaseX();
-        int sceneY = wp.getY() - wv.getBaseY();
-        if (sceneX < 0 || sceneY < 0 || sceneX >= 104 || sceneY >= 104) {
-            return true;
-        }
-        int flag = maps[plane].getFlags()[sceneX][sceneY];
-        return (flag & CollisionDataFlag.BLOCK_MOVEMENT_FULL) != 0;
+        return (ratio * 100) / scale <= percent;
     }
 
-    private void logAnim(NPC npc) {
-        int anim = npc.getAnimation();
-        if (anim != -1) {
-            Integer last = lastLoggedAnimations.get(npc.getIndex());
-            if (last == null || last != anim) {
-                log.info("ToB boss {} (idx {}) animation: {}", npc.getId(), npc.getIndex(), anim);
-                lastLoggedAnimations.put(npc.getIndex(), anim);
-            }
+    private void updateStyle(int animation) {
+        switch (animation) {
+            case ANIM_P3_MAGE:
+                setStyle(VerzikStyle.MAGE, "animation");
+                break;
+            case ANIM_P3_RANGE:
+                setStyle(VerzikStyle.RANGE, "animation");
+                break;
+            case ANIM_P3_MELEE:
+                // Her melee swipe is instant and unprayable, so it needs no colour
+                // of its own. Fall through and leave the last range/magic style up.
+                break;
+            default:
+                // Her specials (webs 8127, yellows 8126) are not autos either -
+                // keep showing the last real attack style rather than blanking out.
+                break;
         }
     }
 
-    private NPC findBoss(Set<Integer> ids) {
-        for (NPC npc : client.getTopLevelWorldView().npcs()) {
+    private void setStyle(VerzikStyle style, String source) {
+        if (verzikStyle != style) {
+            log.info("Verzik P3 attack style: {} -> {} (via {})", verzikStyle, style, source);
+            verzikStyle = style;
+        }
+    }
+
+    private NPC findVerzikP3() {
+        return findNpc(VERZIK_P3_IDS);
+    }
+
+    private NPC findSotetseg() {
+        return findNpc(SOTETSEG_IDS);
+    }
+
+    private NPC findVerzikP2() {
+        return findNpc(VERZIK_P2_IDS);
+    }
+
+    private NPC findXarpus() {
+        return findNpc(XARPUS_COMBAT_IDS);
+    }
+
+    private NPC findNpc(Set<Integer> ids) {
+        WorldView worldView = client.getTopLevelWorldView();
+        if (worldView == null) {
+            return null;
+        }
+        for (NPC npc : worldView.npcs()) {
             if (npc != null && ids.contains(npc.getId())) {
                 return npc;
             }
@@ -450,95 +585,248 @@ public class TheatreHandler implements BossHandler {
         return null;
     }
 
-    private NPC findAnyNylo() {
-        for (NPC npc : client.getTopLevelWorldView().npcs()) {
-            if (npc != null && (NYLO_MELEE_IDS.contains(npc.getId()) || NYLO_RANGE_IDS.contains(npc.getId())
-                    || NYLO_MAGE_IDS.contains(npc.getId()))) {
-                return npc;
+    private boolean inVerzikRegion() {
+        WorldView worldView = client.getTopLevelWorldView();
+        if (worldView == null) {
+            return false;
+        }
+        int[] regions = worldView.getMapRegions();
+        if (regions == null) {
+            return false;
+        }
+        for (int region : regions) {
+            if (region == VERZIK_REGION) {
+                return true;
             }
         }
-        return null;
+        return false;
     }
 
-    private NPC getCurrentBoss() {
-        switch (currentRoom) {
-            case MAIDEN:
-                return findBoss(MAIDEN_IDS);
-            case SOTETSEG:
-                return findBoss(SOTETSEG_IDS);
-            case NYLOCAS:
-                return findBoss(VASILIAS_IDS);
-            case VERZIK:
-                NPC v = findBoss(VERZIK_P1_IDS);
-                if (v == null) {
-                    v = findBoss(VERZIK_P2_IDS);
-                }
-                if (v == null) {
-                    v = findBoss(VERZIK_P3_IDS);
-                }
-                return v;
-            default:
-                return null;
-        }
+    private void resetFightState() {
+        verzikStyle = VerzikStyle.UNKNOWN;
+        enraged = false;
+        attackTimer = -1;
+        timerHeldTicks = 0;
+        lastAnimation = -1;
+        lastAttackTick = -1;
+        projectileAttackPending = false;
+        lastProjectileStartCycle = -1;
+        loggedUnknownAnimations.clear();
+        loggedUnknownProjectiles.clear();
     }
 
     @Override
     public Actor getBossActor(Client client) {
-        return getCurrentBoss();
+        return findVerzikP3();
     }
 
     @Override
     public void reset() {
-        currentRoom = Room.NONE;
-        verzikPhase = 0;
-        bossAttackTimer = -1;
-        bossTimerHeldTicks = 0;
-        lastBossAttackAnim = -1;
-        lastBossAttackTick = -1;
-        verzikP3Cycle = VERZIK_P3_CYCLE;
-        bloatAsleep = false;
-        bloatStateTimer = -1;
-        verzikStyle = VerzikStyle.UNKNOWN;
-        lastLoggedAnimations.clear();
-        lastBloatAnimation = -1;
-        bloatSafeTiles.clear();
-        bloatHandTiles.clear();
+        verzikP3Active = false;
+        verzikNpc = null;
+        ballImpactTick = -1;
+        lastBallStartCycle = -1;
+        ballFlightTicks = -1;
+        verzikP2Countdown.reset();
+        xarpusCountdown.reset();
+        resetFightState();
     }
 
     // --- Accessors for the overlay ---
-    public Room getCurrentRoom() {
-        return currentRoom;
-    }
-
-    public int getVerzikPhase() {
-        return verzikPhase;
-    }
-
-    public int getBossAttackTimer() {
-        return bossAttackTimer;
-    }
-
-    public boolean isBloatAsleep() {
-        return bloatAsleep;
-    }
-
-    public int getBloatStateTimer() {
-        return bloatStateTimer;
-    }
-
-    public List<WorldPoint> getBloatSafeTiles() {
-        return bloatSafeTiles;
+    public boolean isVerzikP3() {
+        return verzikP3Active;
     }
 
     public VerzikStyle getVerzikStyle() {
         return verzikStyle;
     }
 
-    public NyloRole getNyloRole() {
-        return config.tobNyloRole();
+    public int getAttackTimer() {
+        return attackTimer;
     }
 
-    public NPC getBoss() {
-        return getCurrentBoss();
+    public NPC getVerzik() {
+        return findVerzikP3();
+    }
+
+    public NPC getVerzikP2() {
+        return findVerzikP2();
+    }
+
+    public int getVerzikP2AttackTimer() {
+        return verzikP2Countdown.getDisplayTimer();
+    }
+
+    public NPC getXarpus() {
+        return findXarpus();
+    }
+
+    public int getXarpusAttackTimer() {
+        return xarpusCountdown.getDisplayTimer();
+    }
+
+    /**
+     * Ticks until Sotetseg's death ball lands, or -1 when none is airborne. 0 is
+     * the tick it hits the target, which is the tick to eat on to tick eat it.
+     */
+    public int getDeathBallTimer() {
+        if (ballImpactTick < 0) {
+            return -1;
+        }
+        return Math.max(-1, ballImpactTick - client.getTickCount());
+    }
+
+    /**
+     * Flight length in ticks of the airborne death ball, captured at launch, or -1
+     * when none is airborne. The inventory pie timer uses it as the countdown's
+     * full value so the wheel drains from full to empty.
+     */
+    public int getDeathBallFlightTicks() {
+        return ballFlightTicks;
+    }
+
+    /**
+     * Fraction (0..1) of the way through the current game tick, from the client game
+     * cycle (~20ms, 50Hz) since the last tick. The inventory tick-eat pie uses it to
+     * drain smoothly between ticks instead of stepping once per tick.
+     */
+    public double getGameTickFraction() {
+        if (lastGameTickCycle < 0) {
+            return 0.0;
+        }
+        double fraction = (client.getGameCycle() - lastGameTickCycle) / (double) CYCLES_PER_GAME_TICK;
+        return Math.max(0.0, Math.min(1.0, fraction));
+    }
+
+    /**
+     * A Phosani-style attack countdown for a fixed-cadence boss: counts down to 1,
+     * holds there until the boss attacks, then re-arms on the cycle so the hit lands
+     * on the reset number. An attack is read off the boss's auto animation; a
+     * detection inside the cadence is treated as an echo of the attack just handled,
+     * and a backstop re-arms the countdown if an attack is ever missed entirely.
+     *
+     * <p>
+     * The value shown to the player is rotated by {@code stepBackTick} so the
+     * highlighted 1 lands on the tick to step back on rather than on the tick before
+     * the hit - see {@link #getDisplayTimer()}.
+     * </p>
+     */
+    private final class AttackCountdown {
+        private final String label;
+        private final Set<Integer> attackAnimations;
+        private final Set<Integer> attackProjectiles;
+        private final int cycle;
+        private final int stepBackTick;
+
+        private boolean active = false;
+        private int timer = -1;
+        private int heldTicks = 0;
+        private int lastAnimation = -1;
+        private int lastAttackTick = -1;
+        private boolean projectilePending = false;
+        private int lastProjectileStartCycle = -1;
+
+        private AttackCountdown(String label, Set<Integer> attackAnimations, Set<Integer> attackProjectiles, int cycle,
+                int stepBackTick) {
+            this.label = label;
+            this.attackAnimations = attackAnimations;
+            this.attackProjectiles = attackProjectiles;
+            this.cycle = cycle;
+            this.stepBackTick = stepBackTick;
+        }
+
+        // Records an attack projectile launched this tick (Verzik P2's urnbomb has no
+        // attack animation, so its projectile is the only signal). Returns true when
+        // the projectile is one of this boss's attacks so the caller stops there.
+        private boolean onProjectile(Projectile projectile) {
+            if (!active || !attackProjectiles.contains(projectile.getId())) {
+                return false;
+            }
+            // Re-fires every client cycle and launches one per player; the start
+            // cycle identifies the volley exactly once.
+            if (projectile.getStartCycle() > lastProjectileStartCycle) {
+                lastProjectileStartCycle = projectile.getStartCycle();
+                projectilePending = true;
+            }
+            return true;
+        }
+
+        private void update(NPC npc) {
+            if (npc == null) {
+                if (active) {
+                    active = false;
+                    clear();
+                    log.info("{} ended", label);
+                }
+                return;
+            }
+            if (!active) {
+                active = true;
+                clear();
+                log.info("{} started", label);
+            }
+
+            // Poll the animation each tick so a repeat of the same attack still reads
+            // as a fresh start once the boss has returned to idle between attacks.
+            int animation = npc.getAnimation();
+            boolean animationStarted = animation != -1 && animation != lastAnimation;
+            lastAnimation = animation;
+            boolean animationAttack = animationStarted && attackAnimations.contains(animation);
+            boolean attacked = animationAttack || projectilePending;
+            String source = animationAttack ? "animation " + animation : "projectile";
+            projectilePending = false;
+
+            // A detection inside the cadence is an echo of the attack just handled -
+            // the same swing seen a tick later - so it must not re-arm the countdown.
+            int tick = client.getTickCount();
+            int sinceLastAttack = lastAttackTick > 0 ? tick - lastAttackTick : -1;
+            if (attacked && sinceLastAttack >= 0 && sinceLastAttack < cycle - ATTACK_ECHO_SLACK_TICKS) {
+                attacked = false;
+            }
+            if (attacked) {
+                log.info("{} attack: {}, {}t since the last - countdown -> {}",
+                        label, source, sinceLastAttack, cycle);
+                lastAttackTick = tick;
+            }
+
+            if (timer <= 0 || attacked) {
+                timer = cycle;
+                heldTicks = 0;
+            } else if (timer > 1) {
+                timer--;
+            } else if (++heldTicks >= cycle) {
+                // Held on 1 for a full cycle with no attack seen - re-arm so the
+                // countdown keeps running instead of sticking on the warning tick.
+                timer = cycle;
+                heldTicks = 0;
+            }
+        }
+
+        // Clears the countdown between fights, leaving the active flag to update().
+        private void clear() {
+            timer = -1;
+            heldTicks = 0;
+            lastAnimation = -1;
+            lastAttackTick = -1;
+            projectilePending = false;
+            lastProjectileStartCycle = -1;
+        }
+
+        private void reset() {
+            active = false;
+            clear();
+        }
+
+        // The value shown on the overlay: the raw countdown rotated so the step-back
+        // tick reads 1 (and so takes the highlight colour). The raw countdown is
+        // ticks-until-attack (cycle..1); relabelling stepBackTick to 1 turns it into
+        // a count down to the step back, still cycling cycle..1. Inactive (<= 0) is
+        // passed through unchanged so the overlay keeps hiding the timer.
+        private int getDisplayTimer() {
+            if (timer <= 0) {
+                return timer;
+            }
+            return ((timer - stepBackTick + cycle) % cycle) + 1;
+        }
     }
 }

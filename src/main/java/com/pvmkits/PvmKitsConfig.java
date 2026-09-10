@@ -1,14 +1,10 @@
 package com.pvmkits;
 
-import com.pvmkits.bosses.tob.TheatreHandler;
 import net.runelite.client.config.*;
 import java.awt.Color;
 
 @ConfigGroup("pvmkits")
 public interface PvmKitsConfig extends Config {
-
-    @ConfigSection(name = "General", description = "General PVM Kits settings", position = 0, closedByDefault = true)
-    String general = "general";
 
     @ConfigSection(name = "Yama", description = "Yama boss mechanics assistance", position = 1, closedByDefault = true)
     String yama = "yama";
@@ -16,17 +12,20 @@ public interface PvmKitsConfig extends Config {
     @ConfigSection(name = "Phosani's & The Nightmare", description = "Phosani's Nightmare and The Nightmare boss mechanics assistance", position = 2, closedByDefault = true)
     String phosani = "phosani";
 
-    @ConfigSection(name = "Theatre of Blood", description = "Theatre of Blood raid mechanics assistance", position = 3, closedByDefault = true)
+    @ConfigSection(name = "Theatre of Blood", description = "Verzik phase 3 attack style highlighting, Verzik phase 2 / phase 3 and Xarpus attack timers, and Sotetseg's death ball tick eat timer", position = 3, closedByDefault = true)
     String tob = "tob";
 
     @ConfigSection(name = "Maggot King", description = "Maggot King boss discovery and mechanics logging", position = 4, closedByDefault = false)
     String maggotKing = "maggotKing";
 
-    // General Settings
-    @ConfigItem(keyName = "showDebugInfo", name = "Show Debug Info", description = "Display debug information in chat", section = general, position = 0)
-    default boolean showDebugInfo() {
-        return false;
-    }
+    @ConfigSection(name = "Chambers of Xeric", description = "Great Olm attack-style overlay and Tekton flinch timer", position = 5, closedByDefault = false)
+    String cox = "cox";
+
+    @ConfigSection(name = "Doom of Mokhaiotl", description = "Doom of Mokhaiotl (delve boss) mechanics: prayer-book outline for incoming attacks, larvae highlighting and attack priority, boulder shatter tiles, shield / melee-punish boss tiles and the car (dash) phase path and safe tiles. Enable verbose logging to capture unknown projectile/object IDs from the fight to client.log.", position = 6, closedByDefault = false)
+    String mokhaiotl = "mokhaiotl";
+
+    @ConfigSection(name = "Prayer Flicking", description = "Tick-synced heartbeat cue above the prayer orb for prayer flicking, plus a locator orb Redemption click counter", position = 7, closedByDefault = false)
+    String prayerFlick = "prayerFlick";
 
     // Yama Settings
     @ConfigItem(keyName = "highlightYama", name = "Highlight Yama", description = "Highlight Yama NPCs based on their combat phase", section = yama, position = 0)
@@ -69,14 +68,9 @@ public interface PvmKitsConfig extends Config {
         return 36;
     }
 
-    @ConfigItem(keyName = "warningColor", name = "Warning Color", description = "Color for timer when attack is imminent (1 tick remaining)", section = yama, position = 8)
-    default Color warningColor() {
+    @ConfigItem(keyName = "attackTimerColor", name = "Attack Timer Color", description = "Color for the attack countdown timer", section = yama, position = 8)
+    default Color attackTimerColor() {
         return new Color(255, 0, 0); // Bright red
-    }
-
-    @ConfigItem(keyName = "normalTimerColor", name = "Normal Timer Color", description = "Color for timer during normal countdown", section = yama, position = 9)
-    default Color normalTimerColor() {
-        return new Color(0, 255, 255); // Bright teal
     }
 
     @ConfigItem(keyName = "highlightBoulders", name = "Highlight Glyphs", description = "Highlight glyph objects that spawn on the floor during the Yama fight (fire glyphs on fire attacks, shadow glyphs on shadow attacks)", section = yama, position = 10)
@@ -84,29 +78,19 @@ public interface PvmKitsConfig extends Config {
         return true;
     }
 
-    @ConfigItem(keyName = "fireGlyphColor", name = "Fire Glyph Color", description = "Color used to highlight fire glyphs during Yama's fire elemental attack", section = yama, position = 11)
-    default Color fireGlyphColor() {
-        return new Color(255, 100, 0); // Orange
+    @ConfigItem(keyName = "showYamaFireballSafeTiles", name = "Show Fireball Safe Tiles", description = "Highlight the two safe tiles for each 3-fireball line special attack (horizontal, vertical or NW-SE diagonal) during Yama's final enrage phase", section = yama, position = 11)
+    default boolean showYamaFireballSafeTiles() {
+        return true;
     }
 
-    @ConfigItem(keyName = "shadowGlyphColor", name = "Shadow Glyph Color", description = "Color used to highlight shadow glyphs during Yama's shadow elemental attack", section = yama, position = 12)
-    default Color shadowGlyphColor() {
-        return new Color(150, 80, 220); // Purple
+    @ConfigItem(keyName = "yamaFireballSafeTileColor", name = "Fireball Safe Tile Color", description = "Color used to highlight the safe tiles during the 3-fireball line special attack", section = yama, position = 12)
+    default Color yamaFireballSafeTileColor() {
+        return new Color(0, 255, 0); // Green
     }
 
-    @ConfigItem(keyName = "glyphTransparency", name = "Glyph Highlight Transparency", description = "Transparency level for glyph highlighting (0-255)", section = yama, position = 13)
-    default int glyphTransparency() {
-        return 80;
-    }
-
-    @ConfigItem(keyName = "boulderTransparency", name = "Yama Area Highlight Transparency", description = "Transparency level for Yama's 5x5 area highlighting (0-255)", section = yama, position = 14)
-    default int boulderTransparency() {
-        return 50;
-    }
-
-    @ConfigItem(keyName = "showBorderOnly", name = "Show Border Only", description = "Only show the border of Yama's area instead of filling it", section = yama, position = 15)
-    default boolean showBorderOnly() {
-        return false;
+    @ConfigItem(keyName = "yamaTransparency", name = "Highlight Transparency", description = "Transparency level applied to all Yama highlight fills (0-255)", section = yama, position = 13)
+    default int yamaTransparency() {
+        return 70;
     }
 
     // Phosani's Nightmare & The Nightmare Settings
@@ -140,14 +124,9 @@ public interface PvmKitsConfig extends Config {
         return 36;
     }
 
-    @ConfigItem(keyName = "phosaniWarningColor", name = "Warning Color", description = "Color for timer when attack is imminent (1 tick remaining)", section = phosani, position = 3)
-    default Color phosaniWarningColor() {
+    @ConfigItem(keyName = "phosaniAttackTimerColor", name = "Attack Timer Color", description = "Color for the attack countdown timer", section = phosani, position = 3)
+    default Color phosaniAttackTimerColor() {
         return new Color(255, 0, 0); // Bright red
-    }
-
-    @ConfigItem(keyName = "phosaniNormalTimerColor", name = "Normal Timer Color", description = "Color for timer during normal countdown", section = phosani, position = 4)
-    default Color phosaniNormalTimerColor() {
-        return new Color(0, 255, 255); // Bright teal
     }
 
     @ConfigItem(keyName = "phosaniTransparency", name = "Highlight Transparency", description = "Transparency level for tiles, sleepwalkers, husks, and spore highlighting (0-255)", section = phosani, position = 5)
@@ -205,91 +184,61 @@ public interface PvmKitsConfig extends Config {
         return new Color(0, 255, 0); // Green
     }
 
-    // Theatre of Blood Settings
-    @ConfigItem(keyName = "tobShowBloatTimer", name = "Bloat Sleep/Wake Timer", description = "Show how long until the Pestilent Bloat falls asleep and how long until he wakes", section = tob, position = 1)
-    default boolean tobShowBloatTimer() {
-        return true;
-    }
-
-    @ConfigItem(keyName = "tobShowBloatSafeTiles", name = "Bloat Safe Tiles", description = "Highlight tiles hidden from Bloat's line of sight (behind the pillar) with no falling hand, so you can hide as he circles", section = tob, position = 17)
-    default boolean tobShowBloatSafeTiles() {
-        return true;
-    }
-
-    @ConfigItem(keyName = "tobBloatSafeColor", name = "Bloat Safe Tile Color", description = "Color for tiles safe from Bloat's line of sight", section = tob, position = 18)
-    default Color tobBloatSafeColor() {
-        return new Color(0, 255, 0); // Green
-    }
-
-
-    @ConfigItem(keyName = "tobNyloRole", name = "Nylocas Role", description = "Highlight the Nylocas spiders matching your role: Melee=grey, Range=green, Mage=blue", section = tob, position = 2)
-    default TheatreHandler.NyloRole tobNyloRole() {
-        return TheatreHandler.NyloRole.OFF;
-    }
-
-    @ConfigItem(keyName = "tobNyloMeleeColor", name = "Nylo Melee Color", description = "Highlight color for melee (grey) Nylocas", section = tob, position = 3)
-    default Color tobNyloMeleeColor() {
-        return new Color(200, 200, 200); // Grey
-    }
-
-    @ConfigItem(keyName = "tobNyloRangeColor", name = "Nylo Range Color", description = "Highlight color for range (green) Nylocas", section = tob, position = 4)
-    default Color tobNyloRangeColor() {
-        return new Color(0, 220, 0); // Green
-    }
-
-    @ConfigItem(keyName = "tobNyloMageColor", name = "Nylo Mage Color", description = "Highlight color for mage (blue) Nylocas", section = tob, position = 5)
-    default Color tobNyloMageColor() {
-        return new Color(0, 130, 255); // Blue
-    }
-
-    @ConfigItem(keyName = "tobShowSotetsegTimer", name = "Sotetseg Attack Timer", description = "Show Sotetseg's attack countdown timer", section = tob, position = 7)
-    default boolean tobShowSotetsegTimer() {
-        return true;
-    }
-
-    @ConfigItem(keyName = "tobShowVerzikTimer", name = "Verzik Attack Timer", description = "Show Verzik's attack countdown timer across P1/P2/P3", section = tob, position = 8)
-    default boolean tobShowVerzikTimer() {
-        return true;
-    }
-
-    @ConfigItem(keyName = "tobVerzikP3StyleOverlay", name = "Verzik P3 Attack Style Overlay", description = "Highlight Verzik in P3 with a colour matching her current attack style", section = tob, position = 9)
+    // Verzik P3 Settings
+    @ConfigItem(keyName = "tobVerzikP3StyleOverlay", name = "Highlight P3 Verzik Attacks", description = "Highlight Verzik in P3 with a color matching her current attack style", section = tob, position = 0)
     default boolean tobVerzikP3StyleOverlay() {
         return true;
     }
 
-    @ConfigItem(keyName = "tobVerzikMeleeColor", name = "Verzik Melee Color", description = "Color to highlight Verzik P3 during melee attacks", section = tob, position = 10)
-    default Color tobVerzikMeleeColor() {
-        return new Color(240, 100, 100, 120); // Soft red
+    @ConfigItem(keyName = "tobShowVerzikTimer", name = "Show Verzik P3 Attack Timer", description = "Show Verzik's P3 attack countdown timer", section = tob, position = 1)
+    default boolean tobShowVerzikTimer() {
+        return true;
     }
 
-    @ConfigItem(keyName = "tobVerzikRangeColor", name = "Verzik Range Color", description = "Color to highlight Verzik P3 during ranged attacks", section = tob, position = 11)
-    default Color tobVerzikRangeColor() {
-        return new Color(144, 238, 144); // Soft green
+    @ConfigItem(keyName = "tobShowVerzikP2Timer", name = "Show Verzik P2 Step Back Timer", description = "Show Verzik's P2 step-back countdown - a 4-tick attacker (counting 4-3-2-1) covering her ranged urnbombs and her magic blood spells below 35% health, with the 1 landing on the tick to step back", section = tob, position = 8)
+    default boolean tobShowVerzikP2Timer() {
+        return true;
     }
 
-    @ConfigItem(keyName = "tobVerzikMageColor", name = "Verzik Mage Color", description = "Color to highlight Verzik P3 during magic attacks", section = tob, position = 12)
-    default Color tobVerzikMageColor() {
-        return new Color(100, 149, 237); // Soft blue
+    @ConfigItem(keyName = "tobShowXarpusTimer", name = "Show Xarpus Step Back Timer", description = "Show Xarpus's step-back countdown during his poison-spit phase (a 4-tick attacker, counting 4-3-2-1 with the 1 landing on the tick to step back)", section = tob, position = 9)
+    default boolean tobShowXarpusTimer() {
+        return true;
     }
 
-    @ConfigItem(keyName = "tobTimerTextSize", name = "Timer Text Size", description = "Size of the Theatre of Blood attack timer text", section = tob, position = 13)
+    @ConfigItem(keyName = "tobTimerTextSize", name = "Timer Text Size", description = "Size of the attack timer text", section = tob, position = 2)
     default int tobTimerTextSize() {
         return 36;
     }
 
-    @ConfigItem(keyName = "tobWarningColor", name = "Warning Color", description = "Color for timer when an attack is imminent (1 tick remaining)", section = tob, position = 14)
-    default Color tobWarningColor() {
+    @ConfigItem(keyName = "tobAttackTimerColor", name = "Attack Timer Color", description = "Color for the attack countdown timer", section = tob, position = 3)
+    default Color tobAttackTimerColor() {
         return new Color(255, 0, 0); // Bright red
     }
 
-    @ConfigItem(keyName = "tobNormalTimerColor", name = "Normal Timer Color", description = "Color for timer during normal countdown", section = tob, position = 15)
-    default Color tobNormalTimerColor() {
-        return new Color(0, 255, 255); // Bright teal
+    @ConfigItem(keyName = "tobAttackTimerOneTickColor", name = "Attack Timer '1' Tick Color", description = "Color of the attack timer on the '1' tick - the step back tick for Verzik P2 and Xarpus, or the tick before the attack for Verzik P3", section = tob, position = 4)
+    default Color tobAttackTimerOneTickColor() {
+        return new Color(115, 200, 115); // #73C873
     }
 
-    @ConfigItem(keyName = "tobTransparency", name = "Highlight Transparency", description = "Transparency level for Theatre of Blood highlighting (0-255)", section = tob, position = 16)
+    @ConfigItem(keyName = "tobTransparency", name = "Highlight Transparency", description = "Transparency level for the Verzik attack style highlight (0-255)", section = tob, position = 5)
     default int tobTransparency() {
-        return 70;
+        return 50;
+    }
+
+    @ConfigItem(keyName = "tobVerzikRangeColor", name = "Range Color", description = "Color to highlight Verzik P3 during ranged attacks", section = tob, position = 6)
+    default Color tobVerzikRangeColor() {
+        return new Color(144, 238, 144); // Soft green
+    }
+
+    @ConfigItem(keyName = "tobVerzikMageColor", name = "Mage Color", description = "Color to highlight Verzik P3 during magic attacks", section = tob, position = 7)
+    default Color tobVerzikMageColor() {
+        return new Color(100, 149, 237); // Soft blue
+    }
+
+    // Sotetseg Settings
+    @ConfigItem(keyName = "tobSotetsegTickEatTimer", name = "Sotetseg Death Ball Tick Eat Timer", description = "Count down the ticks until Sotetseg's death ball lands, shown over food in your inventory (shark and Saradomin brew) with a draining pie. Counts down in red and turns green on 0 - the tick to eat on to tick eat the ball.", section = tob, position = 13)
+    default boolean tobSotetsegTickEatTimer() {
+        return true;
     }
 
     // Maggot King Settings
@@ -298,53 +247,252 @@ public interface PvmKitsConfig extends Config {
         return true;
     }
 
-    @ConfigItem(keyName = "highlightMaggotKingLarvae", name = "Highlight Larvae", description = "Highlight the maggot larvae with a hull and tile marker, like Phosani's sleepwalkers", section = maggotKing, position = 2)
+    @ConfigItem(keyName = "highlightMaggotKingLarvae", name = "Highlight Larvae", description = "Highlight the maggot larvae with a hull and tile marker, like Phosani's sleepwalkers", section = maggotKing, position = 1)
     default boolean highlightMaggotKingLarvae() {
         return true;
     }
 
-    @ConfigItem(keyName = "showMaggotKingSafeTile", name = "Show Safe Tile", description = "Highlight nearby safe tiles to step to while acid, split projectiles or the melee slam are active", section = maggotKing, position = 3)
-    default boolean showMaggotKingSafeTile() {
-        return true;
-    }
-
-    @ConfigItem(keyName = "showMaggotKingScreechWarning", name = "Screech Prayer Warning", description = "Outline yourself while the Maggot King screeches until all overhead prayers are turned off", section = maggotKing, position = 4)
+    @ConfigItem(keyName = "showMaggotKingScreechWarning", name = "Screech Prayer Warning", description = "Outline yourself while the Maggot King screeches until all overhead prayers are turned off", section = maggotKing, position = 2)
     default boolean showMaggotKingScreechWarning() {
         return true;
     }
 
-    @ConfigItem(keyName = "maggotKingRangeStyleColor", name = "Range Attack Style Color", description = "Color to highlight the Maggot King during ranged attacks", section = maggotKing, position = 5)
+    @ConfigItem(keyName = "maggotKingRangeStyleColor", name = "Range Attack Style Color", description = "Color to highlight the Maggot King during ranged attacks", section = maggotKing, position = 3)
     default Color maggotKingRangeStyleColor() {
         return new Color(0, 255, 0, 160);
     }
 
-    @ConfigItem(keyName = "maggotKingMageStyleColor", name = "Mage Attack Style Color", description = "Color to highlight the Maggot King during magic attacks", section = maggotKing, position = 6)
+    @ConfigItem(keyName = "maggotKingMageStyleColor", name = "Mage Attack Style Color", description = "Color to highlight the Maggot King during magic attacks", section = maggotKing, position = 4)
     default Color maggotKingMageStyleColor() {
         return new Color(0, 100, 255, 160);
     }
 
-    @ConfigItem(keyName = "maggotKingSafeTileColor", name = "Safe Tile Color", description = "Color used to highlight the best safe tile", section = maggotKing, position = 9)
-    default Color maggotKingSafeTileColor() {
-        return new Color(0, 255, 0, 150);
-    }
-
-    @ConfigItem(keyName = "maggotKingScreechColor", name = "Screech Outline Color", description = "Colour of the outline drawn around you while the Maggot King is screeching until you turn off all overhead prayers", section = maggotKing, position = 10)
-    default Color maggotKingScreechColor() {
-        return new Color(255, 0, 0);
-    }
-
-    @ConfigItem(keyName = "maggotKingScreechStyleColor", name = "Screech Style Color", description = "Colour shown on the prayer/attack-style overlay while the Maggot King is screeching (all overhead prayers off), alongside the outline warning", section = maggotKing, position = 11)
+    @ConfigItem(keyName = "maggotKingScreechStyleColor", name = "Screech Style Color", description = "Colour shown on the prayer/attack-style overlay while the Maggot King is screeching (all overhead prayers off), alongside the outline warning", section = maggotKing, position = 6)
     default Color maggotKingScreechStyleColor() {
         return new Color(255, 255, 0, 160);
     }
 
-    @ConfigItem(keyName = "maggotKingTransparency", name = "Overlay Transparency", description = "Transparency level for Maggot King overlays (0-255)", section = maggotKing, position = 12)
+    @ConfigItem(keyName = "maggotKingTransparency", name = "Overlay Transparency", description = "Transparency level for Maggot King overlays (0-255)", section = maggotKing, position = 7)
     default int maggotKingTransparency() {
         return 85;
     }
 
-    @ConfigItem(keyName = "maggotKingVerboseLogging", name = "Verbose Event Logging", description = "Log extra graphics, projectile, sound and object events to help decode mechanics on release", section = maggotKing, position = 13)
-    default boolean maggotKingVerboseLogging() {
+    @ConfigItem(keyName = "hideDriedAcid", name = "Hide Dried Acid", description = "Hide the dried acid (safe) game objects so they are invisible", section = maggotKing, position = 8)
+    default boolean hideDriedAcid() {
+        return false;
+    }
+
+    // Chambers of Xeric Settings
+    @ConfigItem(keyName = "showTektonAttackTimer", name = "Show Tekton Flinch Timer", description = "Display Tekton's flinch countdown timer over him (counts 3-2-1; click into melee on 1)", section = cox, position = 0)
+    default boolean showTektonAttackTimer() {
         return true;
+    }
+
+    @ConfigItem(keyName = "tektonTimerTextSize", name = "Flinch Timer Text Size", description = "Size of the Tekton flinch timer text", section = cox, position = 1)
+    default int tektonTimerTextSize() {
+        return 36;
+    }
+
+    @ConfigItem(keyName = "tektonAttackTimerColor", name = "Flinch Timer Color", description = "Color for the Tekton flinch timer on ticks other than 1", section = cox, position = 2)
+    default Color tektonAttackTimerColor() {
+        return new Color(255, 0, 0); // Bright red
+    }
+
+    @ConfigItem(keyName = "tektonStepTickColor", name = "Flinch Step-In (Tick 1) Color", description = "Color of the flinch timer on the '1' tick - the tick to click into melee distance", section = cox, position = 3)
+    default Color tektonStepTickColor() {
+        return new Color(0, 255, 0); // Green = click into melee this tick
+    }
+
+    @ConfigItem(keyName = "showOlmAttackStyleOverlay", name = "Show Olm Attack Style", description = "Highlight the Great Olm's head with a colour matching the attack style (mage/range) aimed at you, so you can pray correctly", section = cox, position = 4)
+    default boolean showOlmAttackStyleOverlay() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "olmMageColor", name = "Olm Magic Color", description = "Color shown over Olm's head when his incoming attack on you is magic", section = cox, position = 5)
+    default Color olmMageColor() {
+        return new Color(100, 149, 237); // Soft blue
+    }
+
+    @ConfigItem(keyName = "olmRangeColor", name = "Olm Ranged Color", description = "Color shown over Olm's head when his incoming attack on you is ranged", section = cox, position = 6)
+    default Color olmRangeColor() {
+        return new Color(144, 238, 144); // Soft green
+    }
+
+    @ConfigItem(keyName = "showOlmCrystalBomb", name = "Show Olm Crystal Bomb Blast", description = "Highlight the 5x5 blast area where Olm's crystal bomb will explode so you can move out", section = cox, position = 8)
+    default boolean showOlmCrystalBomb() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "olmCrystalBombColor", name = "Olm Crystal Bomb Color", description = "Color of the Olm crystal bomb blast area highlight", section = cox, position = 9)
+    default Color olmCrystalBombColor() {
+        return new Color(255, 90, 0); // Orange-red danger
+    }
+
+    @ConfigItem(keyName = "showShamanSpitBlast", name = "Show Shaman Spit Blast", description = "Highlight the 5x5 hit area of a Lizardman Shaman's acid spit so you can move out", section = cox, position = 10)
+    default boolean showShamanSpitBlast() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "shamanSpitBlastColor", name = "Shaman Spit Blast Color", description = "Color of the Lizardman Shaman acid spit blast area highlight", section = cox, position = 11)
+    default Color shamanSpitBlastColor() {
+        return new Color(200, 0, 200); // Magenta, distinct from prayer colours
+    }
+
+    @ConfigItem(keyName = "showVasaBoulderBlast", name = "Show Vasa Boulder Blast", description = "Highlight the 3x3 landing area of Vasa Nistirio's thrown boulders so you can move out", section = cox, position = 12)
+    default boolean showVasaBoulderBlast() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "vasaBoulderBlastColor", name = "Vasa Boulder Blast Color", description = "Color of the Vasa Nistirio boulder blast area highlight", section = cox, position = 13)
+    default Color vasaBoulderBlastColor() {
+        return new Color(144, 238, 144); // Soft green, matches the ranged prayer cue
+    }
+
+    // Section-wide transparency; keyName stays "olmTransparency" to keep saved values.
+    @ConfigItem(keyName = "olmTransparency", name = "Highlight Transparency", description = "Transparency of all Chambers of Xeric highlight fills (0-255): Olm attack style, crystal bomb, Shaman spit blast and Vasa boulder blast", section = cox, position = 14)
+    default int olmTransparency() {
+        return 50;
+    }
+
+    // Prayer Flicking Settings
+    @ConfigItem(keyName = "showPrayerFlickHeartbeat", name = "Show Flick Heartbeat", description = "Flash a red heartbeat dot above the prayer orb once per game tick, peaking just before the middle of each tick, to keep the rhythm for prayer flicking (unlimited prayer)", section = prayerFlick, position = 0)
+    default boolean showPrayerFlickHeartbeat() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "prayerFlickHeartbeatColor", name = "Heartbeat Color", description = "Colour of the prayer flick heartbeat dot", section = prayerFlick, position = 1)
+    default Color prayerFlickHeartbeatColor() {
+        return new Color(255, 0, 0); // Bright red
+    }
+
+    @ConfigItem(keyName = "prayerFlickHeartbeatSize", name = "Heartbeat Size", description = "Radius of the heartbeat dot in pixels", section = prayerFlick, position = 2)
+    default int prayerFlickHeartbeatSize() {
+        return 5;
+    }
+
+    @ConfigItem(keyName = "prayerFlickHeartbeatVerticalOffset", name = "Vertical Offset", description = "Lower the heartbeat dot by this many pixels (higher = further down, towards or onto the prayer orb)", section = prayerFlick, position = 3)
+    @Range(min = -200, max = 200)
+    default int prayerFlickHeartbeatVerticalOffset() {
+        return 0;
+    }
+
+    @ConfigItem(keyName = "prayerFlickHeartbeatHorizontalOffset", name = "Horizontal Offset", description = "Shift the heartbeat dot sideways by this many pixels (positive = right, negative = left)", section = prayerFlick, position = 4)
+    @Range(min = -200, max = 200)
+    default int prayerFlickHeartbeatHorizontalOffset() {
+        return 0;
+    }
+
+    @ConfigItem(keyName = "showPrayerFlickPrayerOutline", name = "Highlight Active Prayer", description = "Fill the icon of each active offensive prayer (Piety/Rigour/Augury, etc.) in the open prayer book with a pulsing transparent red (same rhythm as the heartbeat)", section = prayerFlick, position = 5)
+    default boolean showPrayerFlickPrayerOutline() {
+        return true;
+    }
+
+    // Locator Orb Settings (within Prayer Flicking)
+    @ConfigItem(keyName = "showLocatorOrbRedemptionCounter", name = "Show Redemption Counter", description = "Show a countdown over the locator orb in the inventory: the number of clicks (10 damage each) needed to drop to the Redemption threshold (10% of maximum hitpoints). It reads ...3, 2, 1 (armed - the next click procs) then 0, and resets once Redemption heals you", section = prayerFlick, position = 6)
+    default boolean showLocatorOrbRedemptionCounter() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "locatorOrbCounterColor", name = "Counter Color", description = "Colour of the counter while still counting down (2 or more clicks from proccing)", section = prayerFlick, position = 7)
+    default Color locatorOrbCounterColor() {
+        return new Color(255, 255, 0); // Yellow
+    }
+
+    @ConfigItem(keyName = "locatorOrbArmedColor", name = "Armed Color", description = "Colour of the counter when armed - 1 click from proccing Redemption, or already at or below the threshold (0)", section = prayerFlick, position = 8)
+    default Color locatorOrbArmedColor() {
+        return new Color(0, 255, 0); // Green
+    }
+
+    // Doom of Mokhaiotl Settings
+    @ConfigItem(keyName = "showMokhaiotlPrayerOutline", name = "Show Prayer Highlight", description = "Fill the required protection prayer icon in the prayer book with a transparent colour, shown on the next incoming attack to pray until you pray it. Covers standard orbs, car-phase attacks and the boulder shatter sequence", section = mokhaiotl, position = 1)
+    default boolean showMokhaiotlPrayerOutline() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "mokhaiotlPrayerGreenTransparency", name = "Prayer Highlight Transparency", description = "Opacity of the prayer-book highlight fill (0-255), so the prayer icon still shows through", section = mokhaiotl, position = 3)
+    @Range(min = 0, max = 255)
+    default int mokhaiotlPrayerGreenTransparency() {
+        return 120;
+    }
+
+    @ConfigItem(keyName = "highlightMokhaiotlLarvae", name = "Highlight Larvae", description = "Highlight demonic larvae true tiles in the colour of the combat style needed to kill them (green range, blue magic, red melee)", section = mokhaiotl, position = 5)
+    default boolean highlightMokhaiotlLarvae() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "mokhaiotlLarvaeMenuSwap", name = "Prioritise Attack Larvae", description = "Make Attack the default left-click option on demonic larvae so they can be clicked even while stacked under the boss", section = mokhaiotl, position = 6)
+    default boolean mokhaiotlLarvaeMenuSwap() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showMokhaiotlBoulderTiles", name = "Show Boulder Shatter Tiles", description = "Highlight the tiles a rock throw's boulder will shatter onto so you can move out of them", section = mokhaiotl, position = 9)
+    default boolean showMokhaiotlBoulderTiles() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showMokhaiotlShieldTile", name = "Show Shield Phase Tile", description = "Highlight the boss's 5x5 true tile in blue during its shield phase", section = mokhaiotl, position = 11)
+    default boolean showMokhaiotlShieldTile() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showMokhaiotlDashPath", name = "Show Car Phase Dash Path", description = "Highlight the straight-line path the burrowed boss dashes along towards its eye tile during the car (dash) phase", section = mokhaiotl, position = 13)
+    default boolean showMokhaiotlDashPath() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showMokhaiotlCarSafeTiles", name = "Show Car Phase Safe Tiles", description = "Highlight tiles shielded from the dash by an arena boulder (line-of-sight blocked from the boss)", section = mokhaiotl, position = 15)
+    default boolean showMokhaiotlCarSafeTiles() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showMokhaiotlMeleePunishTile", name = "Show Melee Punish Tile", description = "Highlight the boss's 5x5 true tile in red while it charges its beam and must be melee-punished", section = mokhaiotl, position = 17)
+    default boolean showMokhaiotlMeleePunishTile() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "mokhaiotlMeleePunishSound", name = "Melee Punish Sound", description = "Play an audio alert (bundled two-tone chime, played outside the game's own audio) the moment the boss starts its beam charge-up and must be melee-punished", section = mokhaiotl, position = 18)
+    default boolean mokhaiotlMeleePunishSound() {
+        return false;
+    }
+
+    @Range(min = 0, max = 100)
+    @ConfigItem(keyName = "mokhaiotlMeleePunishSoundVolume", name = "Melee Punish Sound Volume", description = "Volume of the melee-punish audio alert (0-100)", section = mokhaiotl, position = 19)
+    default int mokhaiotlMeleePunishSoundVolume() {
+        return 70;
+    }
+
+    @ConfigItem(keyName = "showMokhaiotlStatues", name = "Show Shockwave Statues", description = "Highlight the nearest usable pair of volatile earth statues (in line, 14+ tiles apart): the far one green then red once attacked, the near one dormant grey until its turn", section = mokhaiotl, position = 20)
+    default boolean showMokhaiotlStatues() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showMokhaiotlShockwaveTimer", name = "Show Shockwave Timer", description = "Display a countdown over the highlighted statues showing ticks until the boss's shockwave attack", section = mokhaiotl, position = 23)
+    default boolean showMokhaiotlShockwaveTimer() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "mokhaiotlTimerTextSize", name = "Timer Text Size", description = "Size of the shockwave countdown timer text", section = mokhaiotl, position = 25)
+    default int mokhaiotlTimerTextSize() {
+        return 36;
+    }
+
+    @ConfigItem(keyName = "hideMokhaiotlOrbModel", name = "Hide Orb Model", description = "Hide the 3x3 earthen shield orb model so it does not obscure the arena, while keeping its true tile highlighted", section = mokhaiotl, position = 26)
+    default boolean hideMokhaiotlOrbModel() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showMokhaiotlOrbTile", name = "Show Orb True Tile", description = "Highlight the earthen shield orb's 3x3 true tile so you can stand under it as it moves between statues", section = mokhaiotl, position = 27)
+    default boolean showMokhaiotlOrbTile() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "mokhaiotlTransparency", name = "Highlight Transparency", description = "Transparency level applied to all Doom of Mokhaiotl tile fills (0-255)", section = mokhaiotl, position = 29)
+    default int mokhaiotlTransparency() {
+        return 70;
+    }
+
+    @ConfigItem(keyName = "mokhaiotlVerboseLogging", name = "Verbose Logging", description = "Log unknown projectile/object IDs from the Doom of Mokhaiotl fight to client.log for development purposes", section = mokhaiotl, position = 31)
+    default boolean mokhaiotlVerboseLogging() {
+        return false;
     }
 }

@@ -3,6 +3,8 @@ package com.pvmkits.bosses.yama;
 import com.pvmkits.core.BossHandler;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
+import net.runelite.api.coords.LocalPoint;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GraphicChanged;
 import net.runelite.api.events.GameTick;
@@ -32,6 +34,15 @@ public class YamaHandler implements BossHandler {
     private static final int GRAPHIC_MAGE = 3246;
     private static final int GRAPHIC_RANGE = 3243;
     private static final int GRAPHIC_GLYPH_ATTACK = 3253;
+    // Fire special variant (seen near the end of the fight) - treated as a fire
+    // special attack: highlights Yama's fire-special colour and the fire glyphs.
+    private static final int GRAPHIC_FIRE_SPECIAL_VARIANT = 3270;
+    // Shadow special variant - the shadow mirror of the fire special variant:
+    // highlights Yama's shadow-special colour and the shadow glyphs. Confirmed
+    // from client logs (2026-07-19 enrage): graphic 3259 fires with the same
+    // special animation (12148) as the fire special (3270) and its own projectile
+    // (3260), interleaved with the fire special during the enrage.
+    private static final int GRAPHIC_SHADOW_SPECIAL_VARIANT = 3259;
 
     // Yama NPC ID
     private static final int YAMA_ID = 14176;
@@ -73,6 +84,39 @@ public class YamaHandler implements BossHandler {
     private static final int GRAPHIC_SHADOW_ATTACK = 3256;
     private static final int PROJECTILE_FIRE_ATTACK = 3254;
     private static final int PROJECTILE_SHADOW_ATTACK = 3257;
+    // Shadow special variant projectile - fallback for graphic 3259, mirroring the
+    // projectile fallbacks kept for the regular fire/shadow attacks.
+    private static final int PROJECTILE_SHADOW_SPECIAL_VARIANT = 3260;
+
+    // ---- 3-fireball line special attack (final enrage phase) ----
+    // Each cast drops three fireballs in a straight line: horizontal (E-W),
+    // vertical (N-S), or NW-SE diagonal. The centre fireball lands on the player;
+    // the two safe tiles are the tiles immediately perpendicular to the line
+    // through that centre (horizontal -> N/S, vertical -> E/W, NW-SE -> NE/SW).
+    //
+    // Confirmed from client logs (2026-07-19 enrage): the fireball is
+    // GraphicsObject id 3262, and the three fireballs are NOT adjacent - straight
+    // lines are spaced 3 tiles apart and diagonals 2 tiles apart. So the line is
+    // detected by geometry rather than adjacency: for any two fireballs whose
+    // integer midpoint also carries a fireball (i.e. a true 3-in-a-line), that
+    // midpoint is the centre and the safe tiles are centre +/- the perpendicular
+    // unit step (see recomputeFireballSafeTiles). No projectile id was observed
+    // for this attack; the projectile set is kept for the fallback path only.
+    private static final Set<Integer> FIREBALL_GRAPHIC_IDS = new HashSet<>(Arrays.asList(3262));
+    private static final Set<Integer> FIREBALL_PROJECTILE_IDS = new HashSet<>();
+
+    // Client game cycles per game tick (600ms / 20ms). Converts a projectile's
+    // remaining cycles into the game tick it will land on.
+    private static final int CYCLES_PER_GAME_TICK = 30;
+
+    // How long an impact fireball graphic keeps its tile flagged after it is seen.
+    // Kept short so an old line's tiles never linger into the next line's solve.
+    private static final int FIREBALL_GRAPHIC_LINGER_TICKS = 2;
+
+    // Largest distance (in tiles) an outer fireball sits from the centre. Observed
+    // radii are 3 (straight) and 2 (diagonal); the cap rejects pairing unrelated
+    // fireballs from different casts that briefly overlap.
+    private static final int FIREBALL_MAX_ARM_RADIUS = 4;
 
     // Known glyph object IDs spawned during the Yama fight. If this set is made
     // empty, discovery mode activates: every floor GameObject that spawns is
@@ -86,6 +130,24 @@ public class YamaHandler implements BossHandler {
     // Which glyph type is currently active, driven by the elemental attack
     // projectile that was last seen (fire -> fire glyphs, shadow -> shadow glyphs)
     private GlyphType activeGlyphType = GlyphType.NONE;
+
+    // How long (in ticks) the glyph highlight stays lit after the last elemental
+    // attack detection. Refreshed on every fire/shadow detection so multi-wave
+    // attacks keep the highlight alive, then it clears once the attack is over.
+    private static final int GLYPH_HIGHLIGHT_DURATION_TICKS = 5;
+
+    // Tick at which the active glyph highlight expires and is cleared
+    private int activeGlyphExpiryTick = -1;
+
+    // Fireball special: telegraphed landing tiles -> the tick the telegraph
+    // expires. Fed by projectiles (while airborne, early warning) and/or impact
+    // graphics, then solved into safe tiles every tick.
+    private final Map<WorldPoint, Integer> fireballTiles = new HashMap<>();
+
+    // The safe tiles derived from the active fireball line(s), recomputed each
+    // tick. Normally two per line; a tile that itself has a fireball on it is
+    // never included.
+    private final Set<WorldPoint> fireballSafeTiles = new HashSet<>();
 
     public enum GlyphType {
         NONE, FIRE, SHADOW
@@ -130,23 +192,58 @@ public class YamaHandler implements BossHandler {
 
     @Override
     public void onProjectileMoved(ProjectileMoved event) {
+        Projectile projectile = event.getProjectile();
+        if (projectile == null) {
+            return;
+        }
+        int projectileId = projectile.getId();
+
         // Fallback only: the graphic change in onGraphicChanged fires earlier and is
         // the preferred trigger. This catches the case where the graphic is missed.
-        int projectileId = event.getProjectile().getId();
-
         if (projectileId == PROJECTILE_FIRE_ATTACK) {
             setActiveGlyphType(GlyphType.FIRE, "projectile " + projectileId + " (fallback)");
-        } else if (projectileId == PROJECTILE_SHADOW_ATTACK) {
+        } else if (projectileId == PROJECTILE_SHADOW_ATTACK || projectileId == PROJECTILE_SHADOW_SPECIAL_VARIANT) {
             setActiveGlyphType(GlyphType.SHADOW, "projectile " + projectileId + " (fallback)");
+        }
+
+        // 3-fireball line special: record the landing tile while the fireball is
+        // still airborne so the safe tiles can be shown before it lands. The tile
+        // stays flagged through its landing tick, then clears.
+        if (FIREBALL_PROJECTILE_IDS.contains(projectileId)) {
+            WorldPoint target = fireballTargetTile(event, projectile);
+            if (target != null) {
+                int ticksToLand = Math.max(0,
+                        (int) Math.ceil(projectile.getRemainingCycles() / (double) CYCLES_PER_GAME_TICK));
+                int expiry = client.getTickCount() + ticksToLand + 1;
+                fireballTiles.merge(target, expiry, Math::max);
+            }
         }
     }
 
-    private void setActiveGlyphType(GlyphType type, String source) {
-        if (activeGlyphType != type) {
-            activeGlyphType = type;
-            log.info("Yama " + type + " elemental attack detected via " + source
-                    + " - highlighting " + type + " glyphs");
+    private WorldPoint fireballTargetTile(ProjectileMoved event, Projectile projectile) {
+        WorldPoint target = projectile.getTargetPoint();
+        if (target == null) {
+            LocalPoint pos = event.getPosition();
+            target = pos != null ? WorldPoint.fromLocal(client, pos) : null;
         }
+        return target;
+    }
+
+    private void setActiveGlyphType(GlyphType type, String source) {
+        // Only (re)start the highlight window when the attack type actually
+        // changes. A single elemental attack fires the graphic once and then the
+        // projectile repeatedly while it travels; extending the window on each of
+        // those events made the highlight linger far too long, and letting the
+        // graphic-triggered window expire before the projectile re-triggered it
+        // caused a one-tick mid-attack flicker. Anchoring the window to the first
+        // detection of the attack fixes both.
+        if (activeGlyphType == type) {
+            return;
+        }
+        activeGlyphType = type;
+        activeGlyphExpiryTick = client.getTickCount() + GLYPH_HIGHLIGHT_DURATION_TICKS;
+        log.info("Yama " + type + " elemental attack detected via " + source
+                + " - highlighting " + type + " glyphs");
     }
 
     @Override
@@ -203,15 +300,17 @@ public class YamaHandler implements BossHandler {
             yamaPhases.put(index, YamaPhase.MAGE);
         } else if (graphicId == GRAPHIC_RANGE) {
             yamaPhases.put(index, YamaPhase.RANGE);
-        } else if (graphicId == GRAPHIC_GLYPH_ATTACK) {
-            yamaPhases.put(index, YamaPhase.FIRE_SPECIAL); // Assuming glyph is a fire special attack
+        } else if (graphicId == GRAPHIC_GLYPH_ATTACK || graphicId == GRAPHIC_FIRE_SPECIAL_VARIANT) {
+            yamaPhases.put(index, YamaPhase.FIRE_SPECIAL); // Glyph attack / fire special variant
+        } else if (graphicId == GRAPHIC_SHADOW_SPECIAL_VARIANT) {
+            yamaPhases.put(index, YamaPhase.SHADOW_SPECIAL); // Shadow special variant
         }
 
         // Determine which glyphs to highlight based on the elemental attack graphic.
         // This fires earlier than the projectile, giving more reaction time.
-        if (graphicId == GRAPHIC_FIRE_ATTACK) {
+        if (graphicId == GRAPHIC_FIRE_ATTACK || graphicId == GRAPHIC_FIRE_SPECIAL_VARIANT) {
             setActiveGlyphType(GlyphType.FIRE, "graphic " + graphicId);
-        } else if (graphicId == GRAPHIC_SHADOW_ATTACK) {
+        } else if (graphicId == GRAPHIC_SHADOW_ATTACK || graphicId == GRAPHIC_SHADOW_SPECIAL_VARIANT) {
             setActiveGlyphType(GlyphType.SHADOW, "graphic " + graphicId);
         }
     }
@@ -223,6 +322,12 @@ public class YamaHandler implements BossHandler {
         }
 
         log.debug("YamaHandler.onGameTick: Called, GameState=" + client.getGameState());
+
+        // Clear the glyph highlight once the elemental attack window has elapsed
+        if (activeGlyphType != GlyphType.NONE && client.getTickCount() >= activeGlyphExpiryTick) {
+            log.info("Yama glyph highlight expired - clearing " + activeGlyphType + " glyphs");
+            activeGlyphType = GlyphType.NONE;
+        }
 
         boolean yamaPresent = false;
         // Track all visible Yamas in the scene
@@ -304,8 +409,14 @@ public class YamaHandler implements BossHandler {
             attackCooldowns.clear();
             glyphObjects.clear();
             activeGlyphType = GlyphType.NONE;
+            activeGlyphExpiryTick = -1;
+            fireballTiles.clear();
+            fireballSafeTiles.clear();
             return;
         }
+
+        // Solve the 3-fireball line special into safe tiles for this tick.
+        refreshFireballSpecial();
 
         // Update attack timers for all Yamas
         log.debug("YamaHandler.onGameTick: Updating timers for " + yamaAttackTimers.size() + " Yamas");
@@ -365,6 +476,9 @@ public class YamaHandler implements BossHandler {
         newlyInitializedTimers.clear();
         glyphObjects.clear();
         activeGlyphType = GlyphType.NONE;
+        activeGlyphExpiryTick = -1;
+        fireballTiles.clear();
+        fireballSafeTiles.clear();
     }
 
     // Track glyph floor objects that spawn during the Yama fight
@@ -425,6 +539,149 @@ public class YamaHandler implements BossHandler {
             }
         }
         return active;
+    }
+
+    // The safe tiles for the currently-active 3-fireball line special attack(s).
+    // Empty when no fireball line is active. Recomputed every tick.
+    public Set<WorldPoint> getFireballSafeTiles() {
+        return fireballSafeTiles;
+    }
+
+    /**
+     * Collects fireball landing tiles from graphics objects (impacts) each tick,
+     * prunes expired telegraphs, and re-solves the safe tiles. Projectile-based
+     * telegraphs are added earlier in onProjectileMoved.
+     */
+    @SuppressWarnings("deprecation")
+    private void refreshFireballSpecial() {
+        int now = client.getTickCount();
+
+        for (GraphicsObject go : client.getGraphicsObjects()) {
+            if (go == null) {
+                continue;
+            }
+
+            int id = go.getId();
+            LocalPoint lp = go.getLocation();
+            WorldPoint wp = lp != null ? WorldPoint.fromLocal(client, lp) : null;
+
+            if (wp != null && FIREBALL_GRAPHIC_IDS.contains(id)) {
+                fireballTiles.merge(wp, now + FIREBALL_GRAPHIC_LINGER_TICKS, Math::max);
+            }
+        }
+
+        // Drop telegraphs that have expired (an orb clears the tick after it lands).
+        fireballTiles.entrySet().removeIf(e -> now >= e.getValue());
+
+        recomputeFireballSafeTiles();
+    }
+
+    /**
+     * Derives the safe tiles from the current fireball tiles using pure geometry,
+     * independent of how far apart the three fireballs are spaced.
+     *
+     * For every pair of fireballs whose integer midpoint also carries a fireball,
+     * that midpoint is the centre of a genuine 3-in-a-line cast. The line must be
+     * axis-aligned or a perfect diagonal, and the arms within a sane radius, so two
+     * unrelated fireballs never pair up. With the wide spacing seen in the logs the
+     * gap tiles are technically safe too, but only the nearest two matter, so we
+     * emit just the two tiles immediately either side of the centre, perpendicular
+     * to the line: horizontal -> N/S, vertical -> E/W, NW-SE diagonal -> NE/SW
+     * (perp of a unit step (ux, uy) is (-uy, ux)).
+     *
+     * If more than one line is momentarily active (a previous cast's fireballs
+     * lingering into the next), only the pair for the cast whose centre is nearest
+     * the player is shown, since the centre fireball always lands on the player.
+     * The player position is used solely to pick the relevant line, never to
+     * compute the safe tiles themselves.
+     */
+    private void recomputeFireballSafeTiles() {
+        fireballSafeTiles.clear();
+        if (fireballTiles.size() < 3) {
+            return;
+        }
+
+        List<WorldPoint> centres = new ArrayList<>();
+        List<WorldPoint[]> safePairs = new ArrayList<>();
+
+        List<WorldPoint> tiles = new ArrayList<>(fireballTiles.keySet());
+        int count = tiles.size();
+        for (int i = 0; i < count; i++) {
+            WorldPoint a = tiles.get(i);
+            for (int j = i + 1; j < count; j++) {
+                WorldPoint b = tiles.get(j);
+                if (a.getPlane() != b.getPlane()) {
+                    continue;
+                }
+
+                int dx = b.getX() - a.getX();
+                int dy = b.getY() - a.getY();
+
+                // The two arms must be an even distance apart so their midpoint (the
+                // centre fireball) lands on a tile, and form a straight or perfect
+                // diagonal line.
+                if ((dx & 1) != 0 || (dy & 1) != 0) {
+                    continue;
+                }
+                boolean straight = (dx == 0) ^ (dy == 0);
+                boolean diagonal = dx != 0 && Math.abs(dx) == Math.abs(dy);
+                if (!straight && !diagonal) {
+                    continue;
+                }
+
+                int halfX = dx / 2;
+                int halfY = dy / 2;
+                int radius = Math.max(Math.abs(halfX), Math.abs(halfY));
+                if (radius < 1 || radius > FIREBALL_MAX_ARM_RADIUS) {
+                    continue;
+                }
+
+                WorldPoint centre = new WorldPoint(a.getX() + halfX, a.getY() + halfY, a.getPlane());
+                if (!fireballTiles.containsKey(centre)) {
+                    // A real cast always drops a centre fireball on the player; its
+                    // absence means these two are from different casts.
+                    continue;
+                }
+
+                // The nearest two safe tiles: one unit step either side of the
+                // centre, perpendicular to the line direction.
+                int px = -Integer.signum(halfY);
+                int py = Integer.signum(halfX);
+                WorldPoint safeA = new WorldPoint(centre.getX() + px, centre.getY() + py, centre.getPlane());
+                WorldPoint safeB = new WorldPoint(centre.getX() - px, centre.getY() - py, centre.getPlane());
+                centres.add(centre);
+                safePairs.add(new WorldPoint[] { safeA, safeB });
+            }
+        }
+
+        if (centres.isEmpty()) {
+            return;
+        }
+
+        // Keep only the line whose centre is closest to the player.
+        int chosen = 0;
+        WorldPoint playerTile = client.getLocalPlayer() != null
+                ? client.getLocalPlayer().getWorldLocation()
+                : null;
+        if (playerTile != null) {
+            int best = Integer.MAX_VALUE;
+            for (int k = 0; k < centres.size(); k++) {
+                WorldPoint c = centres.get(k);
+                int dist = c.getPlane() == playerTile.getPlane()
+                        ? Math.max(Math.abs(c.getX() - playerTile.getX()), Math.abs(c.getY() - playerTile.getY()))
+                        : Integer.MAX_VALUE;
+                if (dist < best) {
+                    best = dist;
+                    chosen = k;
+                }
+            }
+        }
+
+        for (WorldPoint safe : safePairs.get(chosen)) {
+            if (!fireballTiles.containsKey(safe)) {
+                fireballSafeTiles.add(safe);
+            }
+        }
     }
 
     // Helper methods

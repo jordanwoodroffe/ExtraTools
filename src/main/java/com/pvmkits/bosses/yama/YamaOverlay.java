@@ -7,11 +7,13 @@ import net.runelite.api.GameObject;
 import net.runelite.api.NPC;
 import net.runelite.api.Perspective;
 import net.runelite.api.coords.LocalPoint;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.ui.overlay.*;
 
 import javax.inject.Inject;
 import java.awt.*;
 import java.util.Collection;
+import java.util.Set;
 
 public class YamaOverlay extends Overlay {
 
@@ -20,6 +22,10 @@ public class YamaOverlay extends Overlay {
     private final PvmKitsConfig config;
     private static final int YAMA_SIZE = 5; // Yama is 5x5 tiles
     private static final int YAMA_ID = 14176;
+
+    // Shared border stroke so every Yama highlight border matches the width used
+    // by the Phosani overlay's boss/tile borders (1px).
+    private static final BasicStroke BORDER_STROKE = new BasicStroke(1);
 
     @Inject
     public YamaOverlay(Client client, PvmKitsPlugin plugin, PvmKitsConfig config) {
@@ -32,38 +38,35 @@ public class YamaOverlay extends Overlay {
 
     @Override
     public Dimension render(Graphics2D graphics) {
-        // Only render if Yama highlighting is enabled
-        if (!config.highlightYama() && !config.showAttackTimers() && !config.highlightBoulders()) {
+        if (!config.highlightYama() && !config.showAttackTimers() && !config.highlightBoulders()
+                && !config.showYamaFireballSafeTiles()) {
             return null;
         }
 
-        // Render floor glyph highlights (independent of the Yama NPC)
         if (config.highlightBoulders()) {
             renderGlyphs(graphics);
         }
 
-        // First, render existing Yama highlights
+        if (config.showYamaFireballSafeTiles()) {
+            renderFireballSafeTiles(graphics);
+        }
+
         for (NPC npc : client.getTopLevelWorldView().npcs()) {
             if (npc == null || npc.getId() != YAMA_ID) {
                 continue;
             }
 
-            // Get the phase color for this Yama
             YamaHandler.YamaPhase phase = plugin.getYamaHandler().getYamaPhase(npc.getIndex());
             Color tileColor = phase.getColor();
 
-            // Get base tile location of the NPC
-            LocalPoint basePoint = npc.getLocalLocation();
-            if (basePoint == null) {
+            if (npc.getLocalLocation() == null) {
                 continue;
             }
 
-            // Render attack style overlay if enabled
             if (config.highlightYama()) {
                 renderAttackStyleOverlay(graphics, npc, tileColor);
             }
 
-            // Render attack timer if enabled
             if (config.showAttackTimers()) {
                 renderAttackTimer(graphics, npc);
             }
@@ -79,146 +82,156 @@ public class YamaOverlay extends Overlay {
             return;
         }
 
+        // Reuse the fire/shadow special colours since the glyph lights up during
+        // the matching special. Draw the border opaque so the special colour's own
+        // low alpha doesn't wash it out, and fill at the configured transparency.
         YamaHandler.GlyphType type = handler.getActiveGlyphType();
         Color base = (type == YamaHandler.GlyphType.SHADOW)
-                ? config.shadowGlyphColor()
-                : config.fireGlyphColor();
-        Color fill = new Color(base.getRed(), base.getGreen(), base.getBlue(), config.glyphTransparency());
+                ? config.shadowSpecialColor()
+                : config.fireSpecialColor();
+        Color outline = new Color(base.getRed(), base.getGreen(), base.getBlue());
+        Color fill = new Color(base.getRed(), base.getGreen(), base.getBlue(), config.yamaTransparency());
 
         for (GameObject glyph : glyphs) {
             if (glyph == null) {
                 continue;
             }
 
-            Shape outline = glyph.getConvexHull();
-            if (outline == null) {
-                LocalPoint lp = glyph.getLocalLocation();
-                if (lp == null) {
-                    continue;
-                }
-                outline = Perspective.getCanvasTilePoly(client, lp);
-            }
-            if (outline == null) {
+            // Highlight just the glyph's centre tile rather than its full 3x3
+            // footprint. getLocalLocation() reports the object's centre tile.
+            Polygon tile = Perspective.getCanvasTilePoly(client, glyph.getLocalLocation());
+            if (tile == null) {
                 continue;
             }
 
             graphics.setColor(fill);
-            graphics.fill(outline);
-            graphics.setColor(base);
-            graphics.draw(outline);
+            graphics.fill(tile);
+            graphics.setColor(outline);
+            graphics.setStroke(BORDER_STROKE);
+            graphics.draw(tile);
         }
     }
 
-    @SuppressWarnings("deprecation") // Using deprecated LocalPoint constructor to match working example
+    /**
+     * Highlights the two safe tiles for the active 3-fireball line special attack.
+     * The handler solves these from the fireballs' geometry, so this just paints
+     * whatever tiles it reports (empty when no line is active).
+     */
+    private void renderFireballSafeTiles(Graphics2D graphics) {
+        Set<WorldPoint> safeTiles = plugin.getYamaHandler().getFireballSafeTiles();
+        if (safeTiles == null || safeTiles.isEmpty()) {
+            return;
+        }
+
+        Color base = config.yamaFireballSafeTileColor();
+        Color fill = new Color(base.getRed(), base.getGreen(), base.getBlue(), config.yamaTransparency());
+
+        for (WorldPoint tile : safeTiles) {
+            if (tile == null) {
+                continue;
+            }
+
+            LocalPoint lp = LocalPoint.fromWorld(client, tile);
+            if (lp == null) {
+                continue;
+            }
+
+            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+            if (poly == null) {
+                continue;
+            }
+
+            graphics.setColor(fill);
+            graphics.fill(poly);
+            graphics.setColor(base);
+            graphics.setStroke(BORDER_STROKE);
+            graphics.draw(poly);
+        }
+    }
+
     private void renderAttackStyleOverlay(Graphics2D graphics, NPC npc, Color tileColor) {
         LocalPoint basePoint = npc.getLocalLocation();
         if (basePoint == null) {
             return;
         }
 
-        // Calculate the southwest corner of the 5x5 area
-        int swX = basePoint.getX() - (Perspective.LOCAL_TILE_SIZE * (YAMA_SIZE - 1) / 2);
-        int swY = basePoint.getY() - (Perspective.LOCAL_TILE_SIZE * (YAMA_SIZE - 1) / 2);
-
-        // Calculate the northeast corner of the 5x5 area
-        int neX = swX + ((YAMA_SIZE - 1) * Perspective.LOCAL_TILE_SIZE);
-        int neY = swY + ((YAMA_SIZE - 1) * Perspective.LOCAL_TILE_SIZE);
-
-        // Create LocalPoints for the four corners of the 5x5 area
-        LocalPoint swPoint = new LocalPoint(swX, swY);
-        LocalPoint sePoint = new LocalPoint(neX, swY);
-        LocalPoint nePoint = new LocalPoint(neX, neY);
-        LocalPoint nwPoint = new LocalPoint(swX, neY);
-
-        // Get the polygons for each corner tile
-        Polygon swPoly = Perspective.getCanvasTilePoly(client, swPoint);
-        Polygon sePoly = Perspective.getCanvasTilePoly(client, sePoint);
-        Polygon nePoly = Perspective.getCanvasTilePoly(client, nePoint);
-        Polygon nwPoly = Perspective.getCanvasTilePoly(client, nwPoint);
-
-        if (swPoly == null || sePoly == null || nePoly == null || nwPoly == null) {
+        Polygon borderPoly = buildOuterBorderPoly(basePoint, YAMA_SIZE);
+        if (borderPoly == null) {
             return;
         }
 
-        // Create a consolidated area polygon
-        Polygon borderPoly = new Polygon();
-
-        // Add the outer points of the 5x5 area to create the border
-        // South edge (SW to SE)
-        addPointsToPolygon(borderPoly, swPoly, 0, 1);
-        // East edge (SE to NE)
-        addPointsToPolygon(borderPoly, sePoly, 1, 2);
-        // North edge (NE to NW)
-        addPointsToPolygon(borderPoly, nePoly, 2, 3);
-        // West edge (NW to SW)
-        addPointsToPolygon(borderPoly, nwPoly, 3, 0);
-
-        // Fill entire 5x5 area with semi-transparent color
         graphics.setColor(new Color(tileColor.getRed(), tileColor.getGreen(),
-                tileColor.getBlue(), config.boulderTransparency()));
+                tileColor.getBlue(), config.yamaTransparency()));
         graphics.fill(borderPoly);
-
-        // Draw just the outer border with solid color
         graphics.setColor(tileColor);
+        graphics.setStroke(BORDER_STROKE);
         graphics.draw(borderPoly);
     }
 
     private void renderAttackTimer(Graphics2D graphics, NPC npc) {
-        // Display attack timer over the center of Yama
         int npcIndex = npc.getIndex();
         int attackTimer = plugin.getYamaHandler().getYamaAttackTimer(npcIndex);
 
-        // Only render if timer is valid and greater than 0
-        if (attackTimer > 0) {
-            // Get center point of the NPC for text positioning
-            LocalPoint center = npc.getLocalLocation();
-            if (center != null) {
-                net.runelite.api.Point textPoint = Perspective.localToCanvas(client, center, 0);
-                if (textPoint != null) {
-                    // Set text properties
-                    String timerText = String.valueOf(attackTimer);
-                    java.awt.Font font = new java.awt.Font("Arial", java.awt.Font.BOLD, config.timerTextSize());
-                    graphics.setFont(font);
-
-                    java.awt.FontMetrics metrics = graphics.getFontMetrics();
-                    int textWidth = metrics.stringWidth(timerText);
-                    int textHeight = metrics.getHeight();
-                    int textX = textPoint.getX() - (textWidth / 2);
-                    int textY = textPoint.getY() + (textHeight / 4); // Center vertically
-
-                    // Draw outline for visibility
-                    graphics.setColor(Color.BLACK);
-                    graphics.drawString(timerText, textX - 2, textY - 2);
-                    graphics.drawString(timerText, textX + 2, textY - 2);
-                    graphics.drawString(timerText, textX - 2, textY + 2);
-                    graphics.drawString(timerText, textX + 2, textY + 2);
-                    graphics.drawString(timerText, textX - 2, textY);
-                    graphics.drawString(timerText, textX + 2, textY);
-                    graphics.drawString(timerText, textX, textY - 2);
-                    graphics.drawString(timerText, textX, textY + 2);
-
-                    // Draw main text - use config colors
-                    Color textColor;
-                    if (attackTimer == 1) {
-                        textColor = config.warningColor(); // Bright red for '1'
-                    } else {
-                        textColor = config.normalTimerColor(); // Bright teal for other numbers
-                    }
-                    graphics.setColor(textColor);
-                    graphics.drawString(timerText, textX, textY);
-                }
-            }
-        }
-    }
-
-    // Helper method to add points from one polygon to another
-    private void addPointsToPolygon(Polygon targetPoly, Polygon sourcePoly, int startIdx, int endIdx) {
-        int sourcePoints = sourcePoly.npoints;
-        if (startIdx >= sourcePoints || endIdx >= sourcePoints) {
+        if (attackTimer <= 0) {
             return;
         }
 
-        targetPoly.addPoint(sourcePoly.xpoints[startIdx], sourcePoly.ypoints[startIdx]);
-        targetPoly.addPoint(sourcePoly.xpoints[endIdx], sourcePoly.ypoints[endIdx]);
+        LocalPoint basePoint = npc.getLocalLocation();
+        if (basePoint == null) {
+            return;
+        }
+
+        Polygon baseTilePoly = Perspective.getCanvasTilePoly(client, basePoint);
+        if (baseTilePoly == null) {
+            return;
+        }
+
+        Rectangle tileRect = baseTilePoly.getBounds();
+        int centerX = tileRect.x + tileRect.width / 2;
+        int stableY = tileRect.y + tileRect.height;
+
+        String timerText = String.valueOf(attackTimer);
+        int fontSize = Math.max(20, config.timerTextSize() + 8);
+        graphics.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, fontSize));
+
+        java.awt.FontMetrics metrics = graphics.getFontMetrics();
+        int textX = centerX - (metrics.stringWidth(timerText) / 2);
+        int textY = stableY + (metrics.getHeight() / 4);
+
+        graphics.setColor(config.attackTimerColor());
+        graphics.drawString(timerText, textX, textY);
+    }
+
+    @SuppressWarnings("deprecation")
+    private Polygon buildOuterBorderPoly(LocalPoint center, int size) {
+        int half = (size - 1) / 2;
+        int swX = center.getX() - (Perspective.LOCAL_TILE_SIZE * half);
+        int swY = center.getY() - (Perspective.LOCAL_TILE_SIZE * half);
+        int neX = center.getX() + (Perspective.LOCAL_TILE_SIZE * half);
+        int neY = center.getY() + (Perspective.LOCAL_TILE_SIZE * half);
+
+        Polygon swPoly = Perspective.getCanvasTilePoly(client, new LocalPoint(swX, swY));
+        Polygon sePoly = Perspective.getCanvasTilePoly(client, new LocalPoint(neX, swY));
+        Polygon nePoly = Perspective.getCanvasTilePoly(client, new LocalPoint(neX, neY));
+        Polygon nwPoly = Perspective.getCanvasTilePoly(client, new LocalPoint(swX, neY));
+
+        if (swPoly == null || sePoly == null || nePoly == null || nwPoly == null) {
+            return null;
+        }
+
+        Polygon border = new Polygon();
+        addPointsToPolygon(border, swPoly, 0, 1);
+        addPointsToPolygon(border, sePoly, 1, 2);
+        addPointsToPolygon(border, nePoly, 2, 3);
+        addPointsToPolygon(border, nwPoly, 3, 0);
+        return border;
+    }
+
+    private void addPointsToPolygon(Polygon target, Polygon source, int startIdx, int endIdx) {
+        if (startIdx >= source.npoints || endIdx >= source.npoints) {
+            return;
+        }
+        target.addPoint(source.xpoints[startIdx], source.ypoints[startIdx]);
+        target.addPoint(source.xpoints[endIdx], source.ypoints[endIdx]);
     }
 }
