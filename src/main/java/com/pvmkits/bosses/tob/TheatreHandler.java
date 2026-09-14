@@ -4,6 +4,7 @@ import com.pvmkits.core.BossHandler;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
+import net.runelite.api.GraphicsObject;
 import net.runelite.api.NPC;
 import net.runelite.api.Projectile;
 import net.runelite.api.WorldView;
@@ -11,14 +12,18 @@ import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GraphicChanged;
 import net.runelite.api.events.ProjectileMoved;
+import net.runelite.api.coords.LocalPoint;
 
 import javax.inject.Inject;
 import java.awt.Color;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
- * Theatre of Blood helper, covering two rooms.
+ * Theatre of Blood helper, covering several rooms.
  *
  * <p>
  * <b>Verzik phase 3.</b> Mirrors the Phosani handler: a per-attack style that
@@ -29,6 +34,12 @@ import java.util.Set;
  * phase. Only range and magic are ever displayed: the melee swipe is instant and
  * unprayable, so it leaves the previous range/magic colour up instead of
  * flipping the overlay.
+ * </p>
+ *
+ * <p>
+ * <b>Bloat's falling hands.</b> The chunks of flesh that rain from the ceiling
+ * while he walks are highlighted on the tiles they are coming down on, in normal
+ * and hard mode alike.
  * </p>
  *
  * <p>
@@ -151,6 +162,16 @@ public class TheatreHandler implements BossHandler {
     // Xarpus's attack cadence, in game ticks.
     private static final int XARPUS_CYCLE = 4;
 
+    // Bloat's NPC ids, one per raid mode: normal 8359, story 10812, hard 10813. He
+    // keeps the same id asleep and awake, so his presence alone marks his room.
+    private static final Set<Integer> BLOAT_IDS = Set.of(8359, 10812, 10813);
+
+    // The falling flesh - the "hands" that rain from the ceiling while Bloat walks.
+    // They are spot animations played on the tile they land on, with no NPC or game
+    // object behind them, so the graphic itself is what gets highlighted. Four ids,
+    // one per chunk model, and the same four in every raid mode.
+    private static final Set<Integer> BLOAT_HAND_GRAPHIC_IDS = Set.of(1570, 1571, 1572, 1573);
+
     // The raw countdown value (ticks until his spit lands) on the tick players step
     // back for Xarpus's poison spit. The display is rotated so this value reads 1 -
     // the highlighted tick - so the countdown reaches 1 on the step back rather than
@@ -235,6 +256,10 @@ public class TheatreHandler implements BossHandler {
     private final AttackCountdown xarpusCountdown = new AttackCountdown("Xarpus", XARPUS_ATTACK_ANIMATIONS,
             Set.of(), XARPUS_CYCLE, XARPUS_STEP_BACK_TICK);
 
+    // Whether Bloat is in the scene, refreshed once a tick. The hand highlight is
+    // rebuilt every frame, so this keeps that path off the NPC list.
+    private boolean bloatActive = false;
+
     @Override
     public String getBossName() {
         return "Theatre of Blood";
@@ -242,7 +267,8 @@ public class TheatreHandler implements BossHandler {
 
     @Override
     public boolean isInBossArea(Client client) {
-        return inVerzikRegion() || findVerzikP3() != null || findXarpus() != null || findSotetseg() != null;
+        return inVerzikRegion() || findVerzikP3() != null || findXarpus() != null || findSotetseg() != null
+                || findBloat() != null;
     }
 
     @Override
@@ -404,6 +430,7 @@ public class TheatreHandler implements BossHandler {
         updateVerzik();
         verzikP2Countdown.update(findVerzikP2());
         xarpusCountdown.update(findXarpus());
+        updateBloat();
     }
 
     private void updateVerzik() {
@@ -572,6 +599,21 @@ public class TheatreHandler implements BossHandler {
         return findNpc(XARPUS_COMBAT_IDS);
     }
 
+    private NPC findBloat() {
+        return findNpc(BLOAT_IDS);
+    }
+
+    // Bloat's room is entered asleep, so his presence is tracked rather than an
+    // attack: the hands fall whenever he is walking, and stop when he goes down.
+    private void updateBloat() {
+        boolean present = findBloat() != null;
+        if (present == bloatActive) {
+            return;
+        }
+        bloatActive = present;
+        log.info("Bloat {}", present ? "started" : "ended");
+    }
+
     private NPC findNpc(Set<Integer> ids) {
         WorldView worldView = client.getTopLevelWorldView();
         if (worldView == null) {
@@ -629,6 +671,7 @@ public class TheatreHandler implements BossHandler {
         ballFlightTicks = -1;
         verzikP2Countdown.reset();
         xarpusCountdown.reset();
+        bloatActive = false;
         resetFightState();
     }
 
@@ -663,6 +706,30 @@ public class TheatreHandler implements BossHandler {
 
     public int getXarpusAttackTimer() {
         return xarpusCountdown.getDisplayTimer();
+    }
+
+    /**
+     * The tiles Bloat's falling hands are currently coming down on, or an empty list
+     * when none are in the air. Rebuilt on each call rather than once a tick: the
+     * graphics are created and finish between game ticks, and the overlay reads this
+     * per frame.
+     */
+    public List<LocalPoint> getBloatHandTiles() {
+        if (!bloatActive) {
+            return Collections.emptyList();
+        }
+
+        List<LocalPoint> tiles = new ArrayList<>();
+        for (GraphicsObject go : client.getGraphicsObjects()) {
+            if (go == null || go.finished() || !BLOAT_HAND_GRAPHIC_IDS.contains(go.getId())) {
+                continue;
+            }
+            LocalPoint location = go.getLocation();
+            if (location != null) {
+                tiles.add(location);
+            }
+        }
+        return tiles;
     }
 
     /**

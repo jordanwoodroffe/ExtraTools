@@ -14,11 +14,14 @@ import net.runelite.client.ui.overlay.OverlayPriority;
 
 import javax.inject.Inject;
 import java.awt.*;
+import java.util.List;
 
 /**
  * Draws Verzik's phase 3 attack-style area overlay and attack countdown, using
- * the same rendering as the Phosani overlay. Sotetseg's death ball tick eat
- * countdown is drawn separately over inventory food by {@link TheatreTickEatOverlay}.
+ * the same rendering as the Phosani overlay, plus the step-back countdowns for
+ * Verzik's phase 2 and Xarpus and the tiles Bloat's falling hands land on.
+ * Sotetseg's death ball tick eat countdown is drawn separately over inventory
+ * food by {@link TheatreTickEatOverlay}.
  */
 public class TheatreOverlay extends Overlay {
 
@@ -49,6 +52,7 @@ public class TheatreOverlay extends Overlay {
         renderVerzik(graphics, handler);
         renderVerzikP2(graphics, handler);
         renderXarpus(graphics, handler);
+        renderBloatHands(graphics, handler);
 
         return null;
     }
@@ -102,6 +106,34 @@ public class TheatreOverlay extends Overlay {
         }
 
         renderAttackTimer(graphics, xarpus, handler.getXarpusAttackTimer());
+    }
+
+    // Bloat's falling hands, one highlighted tile per chunk of flesh in the air.
+    // Each is a single tile, so unlike Verzik's footprint there is no border to
+    // build - the tile polygon is filled and outlined as it comes.
+    private void renderBloatHands(Graphics2D graphics, TheatreHandler handler) {
+        if (!config.tobBloatHandHighlight()) {
+            return;
+        }
+
+        List<LocalPoint> handTiles = handler.getBloatHandTiles();
+        if (handTiles.isEmpty()) {
+            return;
+        }
+
+        Color color = config.tobBloatHandColor();
+        Color fill = new Color(color.getRed(), color.getGreen(), color.getBlue(), config.tobTransparency());
+
+        for (LocalPoint tile : handTiles) {
+            Polygon poly = Perspective.getCanvasTilePoly(client, tile);
+            if (poly == null) {
+                continue;
+            }
+            graphics.setColor(fill);
+            graphics.fill(poly);
+            graphics.setColor(color);
+            graphics.draw(poly);
+        }
     }
 
     // Unknown falls back to the style's own grey rather than drawing nothing, so
