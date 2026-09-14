@@ -20,7 +20,7 @@ public class PvmKitsPanel extends PluginPanel {
         new String[]{"Theatre of Blood", "Verzik attack style overlay, P2/P3/Xarpus timers, Sotetseg death ball tick eat"},
         new String[]{"Maggot King", "Attack style overlay, larvae highlight, screech prayer warning"},
         new String[]{"Chambers of Xeric", "Olm attack style, Tekton flinch timer, crystal bomb, shaman spit, Vasa boulder"},
-        new String[]{"Doom of Mokhaiotl", "Prayer highlight, larvae, boulder tiles, shield/punish tiles, car phase, shockwave timer"}
+        new String[]{"Doom of Mokhaiotl", "Prayer highlight, larvae, boulder tiles, shield/punish tiles, car phase, slam danger area, shockwave timer"}
     );
 
     private static final List<String[]> UTILITY_SECTIONS = Arrays.<String[]>asList(

@@ -12,7 +12,7 @@ public interface PvmKitsConfig extends Config {
     @ConfigSection(name = "Phosani's & The Nightmare", description = "Phosani's Nightmare and The Nightmare boss mechanics assistance", position = 2, closedByDefault = true)
     String phosani = "phosani";
 
-    @ConfigSection(name = "Theatre of Blood", description = "Verzik phase 3 attack style highlighting, Verzik phase 2 / phase 3 and Xarpus attack timers, and Sotetseg's death ball tick eat timer", position = 3, closedByDefault = true)
+    @ConfigSection(name = "Theatre of Blood", description = "Verzik phase 3 attack style highlighting, Verzik phase 2 / phase 3 and Xarpus attack timers, Bloat falling hand tile highlighting, and Sotetseg's death ball tick eat timer", position = 3, closedByDefault = true)
     String tob = "tob";
 
     @ConfigSection(name = "Maggot King", description = "Maggot King boss discovery and mechanics logging", position = 4, closedByDefault = false)
@@ -220,7 +220,7 @@ public interface PvmKitsConfig extends Config {
         return new Color(115, 200, 115); // #73C873
     }
 
-    @ConfigItem(keyName = "tobTransparency", name = "Highlight Transparency", description = "Transparency level for the Verzik attack style highlight (0-255)", section = tob, position = 5)
+    @ConfigItem(keyName = "tobTransparency", name = "Highlight Transparency", description = "Transparency level for the Verzik attack style and Bloat falling hand highlights (0-255)", section = tob, position = 5)
     default int tobTransparency() {
         return 50;
     }
@@ -233,6 +233,17 @@ public interface PvmKitsConfig extends Config {
     @ConfigItem(keyName = "tobVerzikMageColor", name = "Mage Color", description = "Color to highlight Verzik P3 during magic attacks", section = tob, position = 7)
     default Color tobVerzikMageColor() {
         return new Color(100, 149, 237); // Soft blue
+    }
+
+    // Bloat Settings
+    @ConfigItem(keyName = "tobBloatHandHighlight", name = "Highlight Bloat's Falling Hands", description = "Highlight the tiles Bloat's falling hands are coming down on while he walks, in normal and hard mode", section = tob, position = 10)
+    default boolean tobBloatHandHighlight() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "tobBloatHandColor", name = "Bloat Falling Hand Color", description = "Color to highlight the tiles Bloat's falling hands land on", section = tob, position = 11)
+    default Color tobBloatHandColor() {
+        return new Color(255, 0, 0); // Bright red
     }
 
     // Sotetseg Settings
@@ -435,13 +446,18 @@ public interface PvmKitsConfig extends Config {
         return true;
     }
 
-    @ConfigItem(keyName = "showMokhaiotlDashPath", name = "Show Car Phase Dash Path", description = "Highlight the straight-line path the burrowed boss dashes along towards its eye tile during the car (dash) phase", section = mokhaiotl, position = 13)
+    @ConfigItem(keyName = "showMokhaiotlDashPath", name = "Show Car Phase Dash Path", description = "Highlight in pastel red the area the burrowed boss tramples as it dashes to its eye tile during the car (dash) phase, including the 2 tiles past the eye its footprint reaches", section = mokhaiotl, position = 13)
     default boolean showMokhaiotlDashPath() {
         return true;
     }
 
-    @ConfigItem(keyName = "showMokhaiotlCarSafeTiles", name = "Show Car Phase Safe Tiles", description = "Highlight tiles shielded from the dash by an arena boulder (line-of-sight blocked from the boss)", section = mokhaiotl, position = 15)
-    default boolean showMokhaiotlCarSafeTiles() {
+    @ConfigItem(keyName = "showMokhaiotlSlamArea", name = "Show Slam Danger Area", description = "Highlight the area the burrowed boss's slam will hit after a car phase dash: a Euclidean disc of radius ~15.8 tiles around where the boss lands, clipped to the arena floor and drawn as one region in transparent white, so anything outside the outline is out of range. Shown from the moment the dash is telegraphed, centred on the eye tile the boss dashes to and then on the boss itself once it lands, so the dash path highlight draws over the top of it", section = mokhaiotl, position = 15)
+    default boolean showMokhaiotlSlamArea() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showMokhaiotlSlamTimer", name = "Show Slam Timer", description = "Display a countdown in the middle of the slam danger area for its last 5 ticks, reaching 0 on the tick of the hit. Only the last 5 are shown because that is the window the impact tick is known exactly. Follow-up shockwaves in the same area get no timer of their own", section = mokhaiotl, position = 16)
+    default boolean showMokhaiotlSlamTimer() {
         return true;
     }
 
@@ -450,7 +466,7 @@ public interface PvmKitsConfig extends Config {
         return true;
     }
 
-    @ConfigItem(keyName = "mokhaiotlMeleePunishSound", name = "Melee Punish Sound", description = "Play an audio alert (bundled two-tone chime, played outside the game's own audio) the moment the boss starts its beam charge-up and must be melee-punished", section = mokhaiotl, position = 18)
+    @ConfigItem(keyName = "mokhaiotlMeleePunishSound", name = "Melee Punish Sound", description = "Play an audio alert (bundled two-tone chime, played outside the game's own audio) from the moment the boss starts its beam charge-up and must be melee-punished. The alert repeats for as long as the charge is up (while the red boss tile is shown) and stops as soon as you interrupt it", section = mokhaiotl, position = 18)
     default boolean mokhaiotlMeleePunishSound() {
         return false;
     }
@@ -461,7 +477,7 @@ public interface PvmKitsConfig extends Config {
         return 70;
     }
 
-    @ConfigItem(keyName = "showMokhaiotlStatues", name = "Show Shockwave Statues", description = "Highlight the nearest usable pair of volatile earth statues (in line, 14+ tiles apart): the far one green then red once attacked, the near one dormant grey until its turn", section = mokhaiotl, position = 20)
+    @ConfigItem(keyName = "showMokhaiotlStatues", name = "Show Shockwave Statues", description = "Highlight the nearest usable pair of volatile earth statues (in line, 14+ tiles apart, relaxing to a shorter or one-tile-off-axis pair when no such pair exists): the far one green then red once attacked, the near one dormant grey until its turn", section = mokhaiotl, position = 20)
     default boolean showMokhaiotlStatues() {
         return true;
     }

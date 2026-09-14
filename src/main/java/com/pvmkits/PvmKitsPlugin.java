@@ -397,9 +397,6 @@ public class PvmKitsPlugin extends Plugin {
         if (maggotKingHandler != null) {
             maggotKingHandler.onGameObjectDespawned(event);
         }
-        if (mokhaiotlHandler != null) {
-            mokhaiotlHandler.onGameObjectDespawned(event);
-        }
     }
 
     @Subscribe

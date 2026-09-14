@@ -22,6 +22,10 @@ import java.util.Map;
  * Each file is decoded once into a raw PCM byte[] and cached; every play opens a
  * fresh Clip from that buffer and closes it when it finishes, so overlapping cues
  * do not cut each other off and no mixer line is left open.
+ *
+ * {@link #loop} instead starts a cue that repeats until {@link #stopLoop} is
+ * called, for alerts that should keep sounding for as long as the mechanic they
+ * warn about is up. Only one loop per resource path runs at a time.
  */
 @Slf4j
 public final class SoundPlayer {
@@ -29,6 +33,12 @@ public final class SoundPlayer {
     // Sounds this JVM already failed to load, so a missing/unsupported file logs
     // once instead of on every trigger.
     private static final Map<String, Boolean> FAILED = new HashMap<>();
+    // Currently looping clips, keyed by resource path, so a loop can be stopped
+    // again without the caller having to hold on to the Clip itself.
+    private static final Map<String, Clip> LOOPS = new HashMap<>();
+    // Silence appended to a looping cue so its repeats are spaced apart instead of
+    // butting up against each other. Short enough to still read as a steady alert.
+    private static final int LOOP_GAP_MS = 250;
 
     private SoundPlayer() {
     }
@@ -59,6 +69,83 @@ public final class SoundPlayer {
             clip.start();
         } catch (Exception e) {
             log.warn("Failed to play sound {}", resourcePath, e);
+        }
+    }
+
+    /**
+     * Starts {@code resourcePath} looping until {@link #stopLoop} is called. If a
+     * loop for the same path is already running it is left playing and only its
+     * volume is refreshed, so this is safe to call every tick for as long as the
+     * alert should be sounding. Repeats are separated by {@link #LOOP_GAP_MS} of
+     * silence.
+     *
+     * @param volumePercent 0-100; 0 stops any running loop and starts nothing
+     */
+    public static synchronized void loop(String resourcePath, int volumePercent) {
+        if (volumePercent <= 0) {
+            stopLoop(resourcePath);
+            return;
+        }
+
+        Clip running = LOOPS.get(resourcePath);
+        if (running != null && running.isOpen()) {
+            applyVolume(running, volumePercent);
+            return;
+        }
+
+        CachedSound sound = load(resourcePath);
+        if (sound == null) {
+            return;
+        }
+
+        try {
+            // Loop the cue with a little silence appended rather than the bare file,
+            // so repeats are spaced out instead of running straight into each other.
+            byte[] pcm = withTrailingSilence(sound);
+            Clip clip = (Clip) AudioSystem.getLine(new DataLine.Info(Clip.class, sound.format));
+            clip.open(sound.format, pcm, 0, pcm.length);
+            applyVolume(clip, volumePercent);
+            clip.loop(Clip.LOOP_CONTINUOUSLY);
+            LOOPS.put(resourcePath, clip);
+        } catch (Exception e) {
+            log.warn("Failed to loop sound {}", resourcePath, e);
+        }
+    }
+
+    // The cue's PCM followed by LOOP_GAP_MS of silence, which becomes the gap
+    // between repeats once the clip loops. Returns the PCM unchanged if the format
+    // does not report a frame rate to measure the gap against.
+    private static byte[] withTrailingSilence(CachedSound sound) {
+        AudioFormat format = sound.format;
+        float frameRate = format.getFrameRate();
+        int frameSize = format.getFrameSize();
+        if (frameRate <= 0 || frameSize <= 0) {
+            return sound.pcm;
+        }
+
+        int silenceBytes = Math.round(frameRate * LOOP_GAP_MS / 1000f) * frameSize;
+        byte[] padded = new byte[sound.pcm.length + silenceBytes];
+        System.arraycopy(sound.pcm, 0, padded, 0, sound.pcm.length);
+        // 8-bit PCM is unsigned, where silence is mid-scale rather than zero; every
+        // other sample size here is signed, for which the zero-filled array is right.
+        if (format.getEncoding() == AudioFormat.Encoding.PCM_UNSIGNED
+                && format.getSampleSizeInBits() == 8) {
+            java.util.Arrays.fill(padded, sound.pcm.length, padded.length, (byte) 0x80);
+        }
+        return padded;
+    }
+
+    /** Stops and releases the loop started for {@code resourcePath}, if any. */
+    public static synchronized void stopLoop(String resourcePath) {
+        Clip clip = LOOPS.remove(resourcePath);
+        if (clip == null) {
+            return;
+        }
+        try {
+            clip.stop();
+            clip.close();
+        } catch (Exception e) {
+            log.warn("Failed to stop looping sound {}", resourcePath, e);
         }
     }
 
