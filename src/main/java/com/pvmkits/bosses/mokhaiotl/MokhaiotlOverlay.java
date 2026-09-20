@@ -24,8 +24,8 @@ import java.util.Set;
 /**
  * Scene overlay for the Doom of Mokhaiotl. Renders the larvae true tiles, the
  * boulder shatter tiles, the boss's 5x5 true tile during the shield and
- * melee-punish phases, the car (dash) phase danger path and the danger area of
- * the slam that follows a dash.
+ * melee-punish phases, the car (dash) phase danger path and boulder safe tiles,
+ * the first-dash eye candidates.
  */
 public class MokhaiotlOverlay extends Overlay {
 
@@ -50,11 +50,14 @@ public class MokhaiotlOverlay extends Overlay {
     private static final Color STATUE_DORMANT_COLOR = new Color(225, 225, 225);
     private static final float DORMANT_FILL_SCALE = 0.3f;
     private static final int DORMANT_BORDER_ALPHA = 110;
-    // The slam countdown only appears for its last few ticks. The area goes up as
-    // soon as the dash is telegraphed, but the impact tick is only exact from the
-    // windup animation onwards (6 ticks out), so capping the number here keeps the
-    // estimate that starts the countdown from ever being shown.
-    private static final int SLAM_TIMER_MAX_TICKS = 5;
+    // Car-phase tiles a boulder shields from the boss. The same soft green the
+    // range-weak larvae use, that being the fight's other "go here" highlight.
+    private static final Color CAR_SAFE_TILE_COLOR = new Color(144, 238, 144);
+
+    // How long the first-dash eye marks take to sweep the whole hue wheel. Slow
+    // enough to read as a colour rather than a flicker, quick enough that the marks
+    // are visibly alive next to the fight's static highlights.
+    private static final long RAINBOW_CYCLE_MS = 3000L;
     private static final Color ORB_TILE_COLOR = new Color(255, 179, 71); // pastel orange
     private static final Color DEFAULT_BORDER_COLOR = Color.WHITE;
     private static final BasicStroke BORDER_STROKE = new BasicStroke(1);
@@ -81,14 +84,19 @@ public class MokhaiotlOverlay extends Overlay {
             return null;
         }
 
-        // Slam area first, so the dash path (and the boulder tiles below) draw over
-        // the top of it rather than under - the same way those red tiles already sit
-        // over a dormant statue's patch.
-        if (config.showMokhaiotlSlamArea()) {
-            renderSlamArea(graphics, handler);
+        // The first-dash eye marks are a standing reference for the whole delve, so
+        // they go down first and every live warning draws over the top of them.
+        if (config.showMokhaiotlEyeSpawnTiles()) {
+            renderEyeSpawnTiles(graphics, handler);
         }
+        // The handler only ever fills one of these two at a time - the dash path
+        // while a dash is telegraphed, the safe tiles the rest of the car phase - so
+        // they cannot overlap and this is the original order.
         if (config.showMokhaiotlDashPath()) {
             renderDashPath(graphics, handler);
+        }
+        if (config.showMokhaiotlCarSafeTiles()) {
+            renderCarSafeTiles(graphics, handler);
         }
         if (config.showMokhaiotlBoulderTiles()) {
             renderBoulderTiles(graphics, handler);
@@ -103,6 +111,7 @@ public class MokhaiotlOverlay extends Overlay {
             renderOrbTile(graphics, handler);
         }
         renderBossPhaseTile(graphics, handler);
+
 
         return null;
     }
@@ -122,17 +131,61 @@ public class MokhaiotlOverlay extends Overlay {
             return;
         }
 
-        Color base;
+        Color base = null;
         if (handler.isShieldPhase() && config.showMokhaiotlShieldTile()) {
             base = SHIELD_TILE_COLOR;
         } else if (handler.isMeleePunishActive() && config.showMokhaiotlMeleePunishTile()) {
             base = MELEE_PUNISH_TILE_COLOR;
+        }
+
+        if (base != null) {
+            fillAndOutline(graphics, poly, base, BORDER_STROKE);
         } else {
             // No phase-specific highlight active: default thin white outline, same as neutral larvae.
             renderThinBorder(graphics, poly, DEFAULT_BORDER_COLOR);
-            return;
         }
-        fillAndOutline(graphics, poly, base, BORDER_STROKE);
+
+        // Highlight the 3 center tiles on the side of the boss that correlates to the remaining rainbow tiles with boulders
+        if (handler.isShieldPhase()) {
+            Set<WorldPoint> eyes = handler.getEyeSpawnTiles();
+            Set<WorldPoint> boulders = handler.getBoulderObjectTiles();
+            WorldPoint center = boss.getWorldLocation().dx(2).dy(2);
+
+            for (WorldPoint eye : eyes) {
+                if (boulders.contains(eye)) {
+                    int dx = eye.getX() - center.getX();
+                    int dy = eye.getY() - center.getY();
+
+                    Color rainbow = rainbowColor();
+
+                    if (Math.abs(dx) > Math.abs(dy)) {
+                        if (dx > 0) {
+                            // East
+                            renderWorldTile(graphics, center.dx(2).dy(-1), rainbow, BORDER_STROKE);
+                            renderWorldTile(graphics, center.dx(2).dy(0), rainbow, BORDER_STROKE);
+                            renderWorldTile(graphics, center.dx(2).dy(1), rainbow, BORDER_STROKE);
+                        } else {
+                            // West
+                            renderWorldTile(graphics, center.dx(-2).dy(-1), rainbow, BORDER_STROKE);
+                            renderWorldTile(graphics, center.dx(-2).dy(0), rainbow, BORDER_STROKE);
+                            renderWorldTile(graphics, center.dx(-2).dy(1), rainbow, BORDER_STROKE);
+                        }
+                    } else {
+                        if (dy > 0) {
+                            // North
+                            renderWorldTile(graphics, center.dx(-1).dy(2), rainbow, BORDER_STROKE);
+                            renderWorldTile(graphics, center.dx(0).dy(2), rainbow, BORDER_STROKE);
+                            renderWorldTile(graphics, center.dx(1).dy(2), rainbow, BORDER_STROKE);
+                        } else {
+                            // South
+                            renderWorldTile(graphics, center.dx(-1).dy(-2), rainbow, BORDER_STROKE);
+                            renderWorldTile(graphics, center.dx(0).dy(-2), rainbow, BORDER_STROKE);
+                            renderWorldTile(graphics, center.dx(1).dy(-2), rainbow, BORDER_STROKE);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -145,71 +198,103 @@ public class MokhaiotlOverlay extends Overlay {
     // as its model hull plus a 3x3 ground patch centred on its tile, both in the
     // same colour, and a destroyed one leaves its red patch behind for a few ticks.
     private void renderStatues(Graphics2D graphics, MokhaiotlHandler handler) {
-        boolean showTimer = config.showMokhaiotlShockwaveTimer();
-        int timer = handler.getShockwaveTimer();
 
         renderDestroyedStatueTiles(graphics, handler);
+        // Drawn ahead of the statues themselves, and outside the early return below,
+        // because these tiles are tied to the shockwave countdown rather than to the
+        // statue NPCs and so outlive them.
+        renderStatueDirectionTiles(graphics, handler);
 
         List<NPC> highlighted = handler.getHighlightedStatues();
         if (highlighted.isEmpty()) {
-            // No usable pair this phase. The shockwave still lands, so keep the
-            // countdown on the nearest statue rather than dropping it with the
-            // highlight.
-            if (showTimer && timer > 0) {
-                NPC anchorNpc = handler.getNearestStatue();
-                java.awt.Shape anchor = anchorNpc == null ? null : anchorNpc.getConvexHull();
-                if (anchor == null && anchorNpc != null) {
-                    LocalPoint lp = anchorNpc.getLocalLocation();
-                    anchor = lp == null ? null : buildOuterBorderPoly(lp, STATUE_GROUND_SIZE);
-                }
-                if (anchor != null) {
-                    renderTimerText(graphics, anchor.getBounds(), timer);
-                }
-            }
             return;
         }
 
         for (NPC npc : highlighted) {
             boolean dormant = handler.isStatueDormant(npc);
-            Color base;
-            if (handler.isStatueAttacked(npc)) {
-                base = STATUE_ATTACKED_COLOR;
-            } else if (dormant) {
-                base = STATUE_DORMANT_COLOR;
-            } else {
-                base = STATUE_COLOR;
-            }
-            // A dormant statue is washed out so it cannot be mistaken for the one to
-            // hit, but stays visible enough to show where the pair runs.
-            int fillAlpha = dormant
-                    ? Math.round(config.mokhaiotlTransparency() * DORMANT_FILL_SCALE)
-                    : config.mokhaiotlTransparency();
-            Color border = dormant ? withAlpha(base, DORMANT_BORDER_ALPHA) : base;
+            boolean skipOverlay = handler.isStatueAttacked(npc) && handler.isStartingStatue(npc);
 
             LocalPoint lp = npc.getLocalLocation();
             Polygon ground = lp == null ? null : buildOuterBorderPoly(lp, STATUE_GROUND_SIZE);
-            if (ground != null) {
-                graphics.setColor(withAlpha(base, fillAlpha));
-                graphics.fill(ground);
-                graphics.setColor(border);
-                graphics.setStroke(BORDER_STROKE);
-                graphics.draw(ground);
-            }
-
             java.awt.Shape hull = npc.getConvexHull();
-            if (hull != null) {
-                graphics.setColor(withAlpha(base, fillAlpha));
-                graphics.fill(hull);
-                graphics.setColor(dormant ? border : base.darker());
-                graphics.setStroke(BORDER_STROKE);
-                graphics.draw(hull);
+
+            if (!skipOverlay) {
+                Color base;
+                if (handler.isStatueAttacked(npc)) {
+                    base = STATUE_ATTACKED_COLOR;
+                } else if (dormant) {
+                    base = STATUE_DORMANT_COLOR;
+                } else {
+                    base = STATUE_COLOR;
+                }
+                // A dormant statue is washed out so it cannot be mistaken for the one to
+                // hit, but stays visible enough to show where the pair runs.
+                int fillAlpha = dormant
+                        ? Math.round(config.mokhaiotlTransparency() * DORMANT_FILL_SCALE)
+                        : config.mokhaiotlTransparency();
+                Color border = dormant ? withAlpha(base, DORMANT_BORDER_ALPHA) : base;
+
+                if (ground != null) {
+                    graphics.setColor(withAlpha(base, fillAlpha));
+                    graphics.fill(ground);
+                    graphics.setColor(border);
+                    graphics.setStroke(BORDER_STROKE);
+                    graphics.draw(ground);
+                }
+
+                if (hull != null) {
+                    graphics.setColor(withAlpha(base, fillAlpha));
+                    graphics.fill(hull);
+                    graphics.setColor(dormant ? border : base.darker());
+                    graphics.setStroke(BORDER_STROKE);
+                    graphics.draw(hull);
+                }
             }
 
-            if (showTimer && timer > 0) {
-                java.awt.Shape timerAnchor = hull != null ? hull : ground;
-                if (timerAnchor != null) {
-                    renderTimerText(graphics, timerAnchor.getBounds(), timer);
+            if (handler.isStartingStatue(npc)) {
+                int shockwaveTimer = handler.getStatueShockwaveTimer();
+                if (shockwaveTimer >= 0) {
+                    java.awt.Rectangle bounds = hull != null ? hull.getBounds() : (ground != null ? ground.getBounds() : null);
+                    if (bounds != null) {
+                        renderTimerText(graphics, bounds, shockwaveTimer);
+                    }
                 }
+            }
+        }
+
+    }
+
+    // The 3 rainbow tiles showing which way the earthen shield runs. They stay up for
+    // the whole shockwave countdown, including the ticks after the statues themselves
+    // have gone, so they clear on the same tick the timer does.
+    private void renderStatueDirectionTiles(Graphics2D graphics, MokhaiotlHandler handler) {
+        Set<WorldPoint> directionTiles = handler.getStatueDirectionTiles();
+        if (directionTiles.isEmpty()) {
+            return;
+        }
+        // A falling boulder is the more urgent thing to read on a tile, and these are
+        // drawn with SRC so they would otherwise paint straight over its red mark.
+        // Leave those tiles to the boulder overlay, but only where it is on to draw
+        // them, so turning it off does not silently lose the direction tile as well.
+        Set<WorldPoint> boulderTiles = config.showMokhaiotlBoulderTiles()
+                ? handler.getBoulderTiles()
+                : java.util.Collections.emptySet();
+
+        for (WorldPoint directionTile : directionTiles) {
+            if (boulderTiles.contains(directionTile)) {
+                continue;
+            }
+            Polygon poly = worldTilePoly(directionTile);
+            if (poly != null) {
+                java.awt.Composite old = graphics.getComposite();
+                graphics.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC));
+                Color base = rainbowColor();
+                graphics.setColor(withAlpha(base, config.mokhaiotlTransparency()));
+                graphics.fill(poly);
+                graphics.setColor(base);
+                graphics.setStroke(BORDER_STROKE);
+                graphics.draw(poly);
+                graphics.setComposite(old);
             }
         }
     }
@@ -259,7 +344,7 @@ public class MokhaiotlOverlay extends Overlay {
         graphics.drawString(text, x - 1, y + 1);
         graphics.drawString(text, x + 1, y + 1);
 
-        graphics.setColor(Color.WHITE);
+        graphics.setColor(number == 0 ? STATUE_COLOR : Color.WHITE);
         graphics.drawString(text, x, y);
     }
 
@@ -346,50 +431,88 @@ public class MokhaiotlOverlay extends Overlay {
     }
 
     // ------------------------------------------------------------------
-    // Post-dash slam area
+    // Car-phase boulder safe tiles
     // ------------------------------------------------------------------
 
-
-    // The disc the slam is about to hit, drawn as one shape: every tile filled, then
-    // only the edges facing out of the area stroked, so the result reads as a single
-    // region rather than a few hundred outlined tiles. Uses the dormant statue's
-    // washed-out white, which is the fight's "this is coming, not yet live" colour.
-    private void renderSlamArea(Graphics2D graphics, MokhaiotlHandler handler) {
-        Set<WorldPoint> area = handler.getSlamAreaTiles();
-        if (area.isEmpty()) {
-            return;
-        }
-        Color base = STATUE_DORMANT_COLOR;
-        Color fill = withAlpha(base, Math.round(config.mokhaiotlTransparency() * DORMANT_FILL_SCALE));
-        Color border = withAlpha(base, DORMANT_BORDER_ALPHA);
-
-        for (WorldPoint tile : area) {
-            Polygon poly = worldTilePoly(tile);
-            if (poly == null) {
-                continue;
-            }
-            graphics.setColor(fill);
-            graphics.fill(poly);
-        }
-        strokePerimeter(graphics, area, border, PATH_BORDER_STROKE);
-
-        // Countdown to the hit, in the middle of the area. By the time it is showing
-        // (its last few ticks) the boss has landed, so that is its own 5x5 centre.
-        // Stops at 0, the tick the first slam lands: the area lingers a moment for
-        // the impact itself and any follow-up rings, which need no timer of their own.
-        if (!config.showMokhaiotlSlamTimer()) {
-            return;
-        }
-        int timer = handler.getSlamTimer();
-        WorldPoint centre = handler.getSlamCentre();
-        if (timer < 0 || timer > SLAM_TIMER_MAX_TICKS || centre == null) {
-            return;
-        }
-        Polygon centrePoly = worldTilePoly(centre);
-        if (centrePoly != null) {
-            renderTimerText(graphics, centrePoly.getBounds(), timer);
+    // Tiles a boulder puts between the player and the boss, so the dash cannot
+    // reach them. Pastel green, the same "this is the one you want" colour the
+    // range-weak larvae are drawn in.
+    private void renderCarSafeTiles(Graphics2D graphics, MokhaiotlHandler handler) {
+        for (WorldPoint tile : handler.getCarSafeTiles()) {
+            renderWorldTile(graphics, tile, CAR_SAFE_TILE_COLOR, BORDER_STROKE);
         }
     }
+
+    // ------------------------------------------------------------------
+    // First-dash eye candidates
+    // ------------------------------------------------------------------
+
+    // The tiles the delve's first dash could send its eye to, marked for the whole
+    // delve. Cycled through the spectrum so they read as a standing reference mark
+    // rather than one of the fight's "move now" warnings, none of which animate.
+    //
+    // Once the shield phase starts the marks are hidden — they served their purpose
+    // before the shield. The exception is any eye-spawn tile that still has a live
+    // boulder ground object on it: that tile stays rainbow-highlighted until the
+    // boulder is removed, so the player can see the boulder is sitting on an eye
+    // location.
+    private void renderEyeSpawnTiles(Graphics2D graphics, MokhaiotlHandler handler) {
+        Set<WorldPoint> tiles = handler.getEyeSpawnTiles();
+        if (tiles.isEmpty() || handler.getDepthLevel() < 6) {
+            return;
+        }
+
+        boolean shieldActive = handler.isShieldPhase();
+        Set<WorldPoint> boulderObjectTiles = shieldActive ? handler.getBoulderObjectTiles() : null;
+
+        Color base = rainbowColor();
+        
+        boolean showWarning = handler.getDepthLevel() == 7 
+            && handler.getEyeSpawnTick() != -1 
+            && (client.getTickCount() - handler.getEyeSpawnTick()) <= 16;
+            
+        boolean flashOn = (client.getTickCount() % 2) == 0;
+
+        for (WorldPoint tile : tiles) {
+            // During shield phase, only keep tiles that have a boulder on them.
+            if (shieldActive && !boulderObjectTiles.contains(tile)) {
+                continue;
+            }
+
+            renderWorldTile(graphics, tile, base, BORDER_STROKE);
+            
+            if (!shieldActive && showWarning && flashOn) {
+                Polygon poly = worldTilePoly(tile);
+                if (poly != null) {
+                    java.awt.Rectangle r = poly.getBounds();
+                    String text = "wait for larvae";
+                    graphics.setFont(new java.awt.Font("Arial", java.awt.Font.PLAIN, 11));
+                    java.awt.FontMetrics metrics = graphics.getFontMetrics();
+                    int x = r.x + r.width / 2 - metrics.stringWidth(text) / 2;
+                    int y = r.y + r.height + metrics.getHeight();
+                    
+                    graphics.setColor(Color.BLACK);
+                    graphics.drawString(text, x - 1, y - 1);
+                    graphics.drawString(text, x + 1, y - 1);
+                    graphics.drawString(text, x - 1, y + 1);
+                    graphics.drawString(text, x + 1, y + 1);
+                    
+                    graphics.setColor(Color.RED);
+                    graphics.drawString(text, x, y);
+                }
+            }
+        }
+    }
+
+    // Hue swept once every RAINBOW_CYCLE_MS, at full saturation so every step of it
+    // stays clearly a colour rather than washing out to white at the top of the
+    // sweep. Driven off wall-clock time, so all four tiles are always the same hue.
+    private static Color rainbowColor() {
+        float hue = (System.currentTimeMillis() % RAINBOW_CYCLE_MS) / (float) RAINBOW_CYCLE_MS;
+        return Color.getHSBColor(hue, 1f, 1f);
+    }
+
+
 
     // ------------------------------------------------------------------
     // Shared drawing helpers

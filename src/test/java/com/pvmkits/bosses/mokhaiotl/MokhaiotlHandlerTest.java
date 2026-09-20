@@ -12,20 +12,20 @@ import static org.junit.Assert.assertTrue;
 public class MokhaiotlHandlerTest {
 
     // The 5x5 boss: its footprint reaches 2 tiles either side of its centre.
-    private static final int BOSS_HALF = 2;
+    private static final int BOSS_HALF = MokhaiotlHandler.BOSS_HALF_SIZE;
 
     @Test
-    public void statuePairNeedsToBeAxisAlignedAndAtLeastFourteenTilesApart() {
+    public void statuePairNeedsToBeAxisAlignedAndAtLeastThirteenTilesApart() {
         WorldPoint origin = new WorldPoint(3000, 3000, 0);
 
-        // Exactly 14 tiles apart in a straight line: the inclusive lower bound.
-        assertTrue(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3014, 3000, 0)));
-        assertTrue(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3000, 3014, 0)));
-        assertTrue(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(2986, 3000, 0)));
-        assertTrue(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3000, 2986, 0)));
+        // Exactly 13 tiles apart in a straight line: the inclusive lower bound.
+        assertTrue(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3013, 3000, 0)));
+        assertTrue(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3000, 3013, 0)));
+        assertTrue(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(2987, 3000, 0)));
+        assertTrue(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3000, 2987, 0)));
 
         // In line but too close.
-        assertFalse(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3013, 3000, 0)));
+        assertFalse(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3012, 3000, 0)));
 
         // Far enough apart but off the axis by a single tile: the orb would waver.
         assertFalse(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3020, 3001, 0)));
@@ -39,7 +39,7 @@ public class MokhaiotlHandlerTest {
         WorldPoint origin = new WorldPoint(3000, 3000, 0);
 
         // Tier 2: still perfectly in line, but only 8 tiles apart.
-        assertFalse(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3008, 3000, 0), 0, 14));
+        assertFalse(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3008, 3000, 0), 0, 13));
         assertTrue(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3008, 3000, 0), 0, 8));
 
         // Tier 3: one tile off the axis is tolerated, two is not.
@@ -49,6 +49,52 @@ public class MokhaiotlHandlerTest {
 
         // Even the loosest tier still rejects a pair that is simply too close.
         assertFalse(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3007, 3001, 0), 1, 8));
+    }
+
+    @Test
+    public void statuesInsideTheBossMeleeBufferRingAreNotUsableEndpoints() {
+        WorldPoint bossCentre = new WorldPoint(3000, 3000, 0);
+
+        // Dead centre, and anywhere inside the 5x5 itself.
+        assertTrue(MokhaiotlHandler.overlapsBossFootprint(bossCentre, 1, bossCentre));
+        assertTrue(MokhaiotlHandler.overlapsBossFootprint(
+                new WorldPoint(3000 + BOSS_HALF, 3000 - BOSS_HALF, 0), 1, bossCentre));
+
+        // Touching is NOT enough to be usable: the exclusion carries a buffer ring so
+        // that attacking the statue never puts the player in melee range. A 3x3 statue
+        // flush against the boss's east column still falls inside it.
+        assertTrue(MokhaiotlHandler.overlapsBossFootprint(
+                new WorldPoint(3003, 3000, 0), 3, bossCentre));
+
+        // The ring is measured off the statue's centre, so a single tile at the same
+        // south-west corner sits one closer in and is likewise excluded.
+        assertTrue(MokhaiotlHandler.overlapsBossFootprint(
+                new WorldPoint(3003, 3000, 0), 1, bossCentre));
+
+        // One tile further in the footprints themselves share a column.
+        assertTrue(MokhaiotlHandler.overlapsBossFootprint(
+                new WorldPoint(3002, 3000, 0), 3, bossCentre));
+
+        // Clear of the ring on the x axis: the first 3x3 statue that is usable.
+        assertFalse(MokhaiotlHandler.overlapsBossFootprint(
+                new WorldPoint(3004, 3000, 0), 3, bossCentre));
+
+        // The ring applies on both axes at once, so a diagonal statue has to clear it
+        // on each. Flush diagonally is still excluded; a tile further out is usable.
+        assertTrue(MokhaiotlHandler.overlapsBossFootprint(
+                new WorldPoint(3003, 3003, 0), 3, bossCentre));
+        assertFalse(MokhaiotlHandler.overlapsBossFootprint(
+                new WorldPoint(3004, 3004, 0), 3, bossCentre));
+
+        // The ring is symmetric: the same clearances apply on the boss's west side.
+        assertTrue(MokhaiotlHandler.overlapsBossFootprint(
+                new WorldPoint(2996, 3000, 0), 3, bossCentre));
+        assertFalse(MokhaiotlHandler.overlapsBossFootprint(
+                new WorldPoint(2994, 3000, 0), 3, bossCentre));
+
+        // A different plane never overlaps.
+        assertFalse(MokhaiotlHandler.overlapsBossFootprint(
+                new WorldPoint(3000, 3000, 1), 1, bossCentre));
     }
 
     @Test
@@ -106,78 +152,39 @@ public class MokhaiotlHandlerTest {
     }
 
     /**
-     * The slam's reach per row, measured off the unclipped slam footprints in
-     * client.log (index = |dy|, value = max |dx|). The point of pinning the whole
-     * table rather than just the radius is that it is what distinguishes the disc
-     * from a square: 15 along the axis but only 11 on the diagonal.
+     * The four candidate tiles for a delve's first car-phase dash eye, measured off
+     * the dashes in client.log. Pinning the exact tiles rather than just the
+     * distance is what records that these are one tile per cardinal ray and nothing
+     * in between: the boss only ever dashes along a compass ray.
      */
-    private static final int[] SLAM_MAX_DX_BY_DY = {
-            15, 15, 15, 15, 15, 15, 14, 14, 13, 13, 12, 11, 10, 9, 7, 5};
-
     @Test
-    public void slamAreaIsADiscMatchingTheReachMeasuredFromTheLogs() {
+    public void firstDashEyeCandidatesAreOneTilePerCardinalRayAtTheDashDistance() {
         WorldPoint centre = new WorldPoint(3000, 3000, 0);
-        Set<WorldPoint> disc = MokhaiotlHandler.slamDisc(centre);
+        Set<WorldPoint> candidates = MokhaiotlHandler.cardinalEyeCandidates(centre);
+        int d = MokhaiotlHandler.CAR_EYE_DASH_DISTANCE;
 
-        for (int dy = 0; dy < SLAM_MAX_DX_BY_DY.length; dy++) {
-            int maxDx = SLAM_MAX_DX_BY_DY[dy];
-            for (int sy : new int[]{1, -1}) {
-                for (int sx : new int[]{1, -1}) {
-                    // The furthest tile of the row is in.
-                    assertTrue("dy " + (sy * dy) + " should reach dx " + (sx * maxDx),
-                            disc.contains(new WorldPoint(3000 + sx * maxDx, 3000 + sy * dy, 0)));
-                    // The one past it is not, which is what makes this a fit and not
-                    // merely an upper bound.
-                    assertFalse("dy " + (sy * dy) + " should stop at dx " + (sx * maxDx),
-                            disc.contains(new WorldPoint(3000 + sx * (maxDx + 1), 3000 + sy * dy, 0)));
-                }
-            }
-        }
+        assertEquals(4, candidates.size());
+        assertTrue(candidates.contains(new WorldPoint(3000, 3000 + d, 0)));
+        assertTrue(candidates.contains(new WorldPoint(3000, 3000 - d, 0)));
+        assertTrue(candidates.contains(new WorldPoint(3000 + d, 3000, 0)));
+        assertTrue(candidates.contains(new WorldPoint(3000 - d, 3000, 0)));
 
-        // Nothing at all beyond the last row.
-        assertFalse(disc.contains(new WorldPoint(3000, 3000 + SLAM_MAX_DX_BY_DY.length, 0)));
-        assertFalse(disc.contains(new WorldPoint(3000, 3000 - SLAM_MAX_DX_BY_DY.length, 0)));
+        // Never the diagonals, which the dash does also use but which this mark
+        // deliberately leaves out, and never the ring of tiles short of the reach.
+        assertFalse(candidates.contains(new WorldPoint(3000 + d, 3000 + d, 0)));
+        assertFalse(candidates.contains(new WorldPoint(3000 + d - 1, 3000, 0)));
+        assertFalse(candidates.contains(centre));
     }
 
     @Test
-    public void slamAreaArmsOnTheTickTheDashPathHighlightClears() {
-        // zooming, telegraphUp, dashSeen, alreadyArmed
-
-        // The handover tick: dash done, telegraph (and so the dash path) gone.
-        assertTrue(MokhaiotlHandler.shouldArmSlamWindow(false, false, true, false));
-
-        // Still dashing, or the telegraph still up: the dash path owns the screen, so
-        // the slam area must not be drawn over it.
-        assertFalse(MokhaiotlHandler.shouldArmSlamWindow(true, false, true, false));
-        assertFalse(MokhaiotlHandler.shouldArmSlamWindow(false, true, true, false));
-        assertFalse(MokhaiotlHandler.shouldArmSlamWindow(true, true, true, false));
-
-        // Start of a car phase, before any dash: no slam is coming yet.
-        assertFalse(MokhaiotlHandler.shouldArmSlamWindow(false, false, false, false));
-
-        // Already armed - by an earlier tick of this same window, or by the windup
-        // animation landing on this tick - so the estimate must not re-arm and
-        // overwrite the exact impact tick.
-        assertFalse(MokhaiotlHandler.shouldArmSlamWindow(false, false, true, true));
-    }
-
-    @Test
-    public void slamAreaCoversTheBossItselfAndIsCentredOnIt() {
+    public void firstDashEyeCandidatesClearTheBossFootprintSoTheyAreAlwaysVisible() {
         WorldPoint centre = new WorldPoint(3000, 3000, 0);
-        Set<WorldPoint> disc = MokhaiotlHandler.slamDisc(centre);
 
-        assertTrue(disc.contains(centre));
-        // The boss's own 5x5 footprint is inside the area it slams.
-        for (int dx = -BOSS_HALF; dx <= BOSS_HALF; dx++) {
-            for (int dy = -BOSS_HALF; dy <= BOSS_HALF; dy++) {
-                assertTrue(disc.contains(new WorldPoint(3000 + dx, 3000 + dy, 0)));
-            }
-        }
-        // Symmetric about the centre, so the highlight never looks lopsided.
-        for (WorldPoint tile : disc) {
-            int dx = tile.getX() - 3000;
-            int dy = tile.getY() - 3000;
-            assertTrue(disc.contains(new WorldPoint(3000 - dx, 3000 - dy, 0)));
+        // Every candidate is outside the boss's own 5x5, or it would be marked under
+        // the boss where it could never be read.
+        for (WorldPoint tile : MokhaiotlHandler.cardinalEyeCandidates(centre)) {
+            int cheb = Math.max(Math.abs(tile.getX() - 3000), Math.abs(tile.getY() - 3000));
+            assertTrue(tile.toString(), cheb > BOSS_HALF);
         }
     }
 }

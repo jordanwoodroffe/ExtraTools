@@ -397,6 +397,9 @@ public class PvmKitsPlugin extends Plugin {
         if (maggotKingHandler != null) {
             maggotKingHandler.onGameObjectDespawned(event);
         }
+        if (mokhaiotlHandler != null) {
+            mokhaiotlHandler.onGameObjectDespawned(event);
+        }
     }
 
     @Subscribe
@@ -420,13 +423,18 @@ public class PvmKitsPlugin extends Plugin {
         }
     }
 
-    // Give demonic larvae Attack priority so they can be clicked while stacked under
-    // the Doom. Runs once per menu build (after the client sorts entries) and moves
-    // larva entries to the end of the array (the default left-click / top of menu).
+    // Re-ranks the Mokhaiotl menu once per build, after the client has sorted it. The
+    // array runs bottom-of-menu first, so its last entry is the left-click one:
+    // demonic larvae are pushed to the end to make Attack their default even while
+    // they are stacked under the Doom, and the volatile earth statues outside the
+    // highlighted pair are pushed to the front so they drop off left-click entirely.
+    private static final int MENU_RANK_DEMOTED = 0;
+    private static final int MENU_RANK_DEFAULT = 1;
+    private static final int MENU_RANK_PROMOTED = 2;
+
     @Subscribe
     public void onPostMenuSort(PostMenuSort event) {
-        if (mokhaiotlHandler == null || !config.mokhaiotlLarvaeMenuSwap()
-                || activeBossHandler != mokhaiotlHandler) {
+        if (mokhaiotlHandler == null || activeBossHandler != mokhaiotlHandler) {
             return;
         }
 
@@ -435,37 +443,49 @@ public class PvmKitsPlugin extends Plugin {
             return;
         }
 
-        boolean hasLarva = false;
-        for (MenuEntry entry : entries) {
-            if (MokhaiotlHandler.isLarva(entry.getNpc())) {
-                hasLarva = true;
-                break;
-            }
+        int[] ranks = new int[entries.length];
+        boolean anyMoved = false;
+        for (int i = 0; i < entries.length; i++) {
+            ranks[i] = menuRank(entries[i]);
+            anyMoved = anyMoved || ranks[i] != MENU_RANK_DEFAULT;
         }
-        if (!hasLarva) {
+        if (!anyMoved) {
             return;
         }
 
+        // Stable partition, so entries of equal rank keep the order the client gave
+        // them and only the promoted/demoted ones actually move.
         MenuEntry[] reordered = new MenuEntry[entries.length];
         int idx = 0;
-        for (MenuEntry entry : entries) {
-            if (!MokhaiotlHandler.isLarva(entry.getNpc())) {
-                reordered[idx++] = entry;
-            }
-        }
-        for (MenuEntry entry : entries) {
-            if (MokhaiotlHandler.isLarva(entry.getNpc())) {
-                reordered[idx++] = entry;
+        for (int rank = MENU_RANK_DEMOTED; rank <= MENU_RANK_PROMOTED; rank++) {
+            for (int i = 0; i < entries.length; i++) {
+                if (ranks[i] == rank) {
+                    reordered[idx++] = entries[i];
+                }
             }
         }
         client.setMenuEntries(reordered);
     }
 
+    // Where one entry belongs in the menu. Both rules key off the entry's NPC, so
+    // every entry on a demoted statue moves together and "Walk here" - which belongs
+    // to no NPC - takes over the left click.
+    private int menuRank(MenuEntry entry) {
+        if (config.mokhaiotlLarvaeMenuSwap() && MokhaiotlHandler.isLarva(entry.getNpc())) {
+            return MENU_RANK_PROMOTED;
+        }
+        if (config.mokhaiotlUnpairedStatueMenuDemote()
+                && mokhaiotlHandler.isUnhighlightedStatue(entry.getNpc())) {
+            return MENU_RANK_DEMOTED;
+        }
+        return MENU_RANK_DEFAULT;
+    }
+
     // Hides the Doom's earthen shield ("orb") model during the Mokhaiotl fight so it
-    // does not obscure the arena; its true tile is still drawn by the overlay.
+    // does not obscure the arena; its true tile is drawn by the overlay when enabled.
     private boolean shouldDrawEntity(Renderable renderable, boolean drawingUI) {
         if (renderable instanceof NPC && MokhaiotlHandler.isEarthenShield((NPC) renderable)
-                && config.hideMokhaiotlOrbModel() && activeBossHandler == mokhaiotlHandler) {
+                && config.showMokhaiotlOrbTile() && activeBossHandler == mokhaiotlHandler) {
             return false;
         }
         return true;

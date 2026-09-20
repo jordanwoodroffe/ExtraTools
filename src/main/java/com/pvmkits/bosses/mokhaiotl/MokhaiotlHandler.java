@@ -6,8 +6,6 @@ import com.pvmkits.core.SoundPlayer;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
-import net.runelite.api.CollisionData;
-import net.runelite.api.CollisionDataFlag;
 import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
 import net.runelite.api.GraphicsObject;
@@ -18,6 +16,7 @@ import net.runelite.api.Projectile;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.AnimationChanged;
+import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GraphicChanged;
@@ -52,8 +51,8 @@ import java.util.Set;
  * <li>a dedicated prayer-book outline system driven by a queue of scheduled
  * prayer events (one per incoming projectile);</li>
  * <li>a scene overlay for larvae true tiles, boulder landing tiles, the shield /
- * melee-punish 5x5 boss tile, the car-phase dash path and the post-dash slam
- * danger area;</li>
+ * melee-punish 5x5 boss tile, the car-phase dash path and its boulder safe
+ * tiles, and the countdown to the slam that follows a dash;</li>
  * <li>a menu-entry priority for attacking larvae stacked under the boss.</li>
  * </ul>
  */
@@ -104,8 +103,6 @@ public class MokhaiotlHandler implements BossHandler {
     static final Set<Integer> BEAM_CHARGE_GRAPHIC_IDS = Set.of(GFX_BEAM_CHARGE_UP, GFX_BEAM_CHARGE_UP_BURROW);
 
     // ---- Confirmed animation IDs (DOM_*) ----
-    // The burrowed boss only plays this while it is dashing ("car zoom").
-    static final int ANIM_BURROWED_MOVEMENT = 12417; // DOM_BURROWED_MOVEMENT
     // Windup of the slam ("shockwave") that follows each dash, and the earliest the
     // attack can be seen: the hit lands a fixed 6 ticks later. Each dash of a car
     // phase gets its own slam, so this fires once per dash rather than once a phase.
@@ -138,6 +135,8 @@ public class MokhaiotlHandler implements BossHandler {
     static final Set<Integer> ROCK_THROW_PROJECTILE_IDS = Set.of(
             3388, 3389, 3390, 3391, 3392, 3393, 3394, 3395,
             3396, 3397, 3398, 3399, 3400, 3401, 3402, 3403);
+            
+    static final Set<Integer> BOULDER_PROJECTILE_IDS = Set.of(3384, 3385);
 
     // Client game cycles per game tick (600ms / 20ms).
     static final int CYCLES_PER_GAME_TICK = 30;
@@ -148,26 +147,36 @@ public class MokhaiotlHandler implements BossHandler {
     private static final int CAR_TELEGRAPH_HOLD_TICKS = 1;
     // Ticks the boss must be absent before a reappearance counts as a new delve.
     private static final int DELVE_GAP_TICKS = 3;
+    // Radius (in tiles) around the player searched for car-phase safe tiles.
+    private static final int CAR_SAFE_SEARCH_RADIUS = 5;
 
-    // ---- Post-dash slam ("shockwave") area ----
-    // The slam's hit area is a Euclidean disc centred on the boss's 5x5 centre: a
-    // tile is hit iff dx*dx + dy*dy <= 250, i.e. a radius of sqrt(250) ~= 15.81
-    // tiles. Measured off every unclipped slam footprint in client.log (the AoE
-    // ground graphics spawn one object per covered tile): the observed max |dx| per
-    // |dy| matches this threshold on all 16 rows, with no tile ever outside it.
-    // Any cutoff from 250 to 255 yields the identical tile set, so 250 is used.
-    static final int SLAM_RADIUS_SQ = 250;
+    // Landed-rock ground object (stays after a rock throw) used for car-phase
+    // line-of-sight safe tiles. 57286 alone, which is the set this has always used
+    // and is confirmed twice over: its spawn tiles in client.log land on the
+    // rock-throw projectiles' own target tiles (57286 at 13409,3744 and 13413,3749
+    // against targets 3367@13409,3744 and 3394@13413,3749). The arena's other
+    // objects in this id range are not rocks - 57285 sits on the exact arena centre
+    // every delve, under the boss - so adding them would only invent safe tiles.
+    static final Set<Integer> BOULDER_OBJECT_IDS = Set.of(57286);
+
+    // ---- Post-dash slam ("shockwave") countdown ----
+    // The boss is 5x5, so its footprint reaches this far from its centre tile.
+    static final int BOSS_HALF_SIZE = 2;
     // Ticks from the slam windup animation to the hit landing. Measured at a
     // consistent 6 across every slam in the logs (anim 10898 -> tiles 10904, etc.).
     private static final int SLAM_IMPACT_DELAY_TICKS = 6;
-    // How long to keep the area up on the boss after a dash finishes while waiting
-    // for the windup animation to arrive with the impact tick. The windup follows the
-    // last dash tick by 1-2, so this only has to cover the handover; it exists so a
-    // windup that never arrives cannot leave the area on screen indefinitely.
-    private static final int SLAM_WINDUP_WAIT_TICKS = 5;
-    // How long the area stays up after the hit lands, so the impact is still
+    // How long the countdown stays up after the hit lands, so the 0 is still
     // readable for the tick or two the game's own graphics linger.
-    private static final int SLAM_AREA_HOLD_TICKS = 2;
+    private static final int SLAM_TIMER_HOLD_TICKS = 2;
+
+    // ---- First-dash eye candidates ----
+    // Tiles from the boss's spawn centre to the tile its first car-phase dash eye
+    // is marked on. Measured off the dashes in client.log: the boss always moves
+    // along one of the eight compass rays (4 tiles per tick, then a remainder) and
+    // lands exactly on the eye. 10 is the most common measured length - 7 of the 12
+    // dashes, with 8, 9, 11 and 12 making up the rest - but the mark sits one tile
+    // in from that, at 9, which is the near side of the spread.
+    static final int CAR_EYE_DASH_DISTANCE = 9;
 
     // VarPlayers holding the delve depth. DOM_CURRENT_LEVEL_TEMP is the live level
     // inside a delve; DOM_LAST_DELVE_LEVEL is the fallback for when it reads 0.
@@ -176,26 +185,24 @@ public class MokhaiotlHandler implements BossHandler {
     // Upper bound used to reject junk varp reads (delves are unbounded in practice).
     private static final int MAX_PLAUSIBLE_DELVE = 100;
 
-    // Ticks after the volatile earth ("statues") appear until the shockwave lands.
-    private static final int SHOCKWAVE_TIMER_TICKS = 20;
+
     // The earthen shield ("orb") footprint size.
     static final int ORB_SIZE = 3;
     // Shortest orb path worth walking: the two statues of a pair must be at least
     // this many tiles apart (inclusive) for the pair to be highlighted.
-    private static final int MIN_STATUE_PAIR_DISTANCE = 14;
+    private static final int MIN_STATUE_PAIR_DISTANCE = 13;
     // Fallback distance used when no pair is MIN_STATUE_PAIR_DISTANCE apart. A
     // shorter orb path is still a usable path, and is far better than drawing
     // nothing at all (which also used to take the shockwave countdown with it).
     private static final int FALLBACK_STATUE_PAIR_DISTANCE = 8;
     // Progressive relaxations tried in order until a pair is found:
     // {maximum off-axis offset in tiles, minimum separation in tiles}. The first
-    // tier is the strict "in line, 14+ apart" rule; later tiers allow a shorter
+    // tier is the strict "in line, 13+ apart" rule; later tiers allow a shorter
     // walk and then a one-tile dogleg, which some layouts (seen after a car phase
     // on deeper delves) only ever satisfy.
     private static final int[][] STATUE_PAIR_TIERS = {
             { 0, MIN_STATUE_PAIR_DISTANCE },
             { 0, FALLBACK_STATUE_PAIR_DISTANCE },
-            { 1, FALLBACK_STATUE_PAIR_DISTANCE },
     };
     // How long the red marker of a destroyed statue stays up after it despawns.
     private static final int DESTROYED_STATUE_HOLD_TICKS = 10;
@@ -257,40 +264,35 @@ public class MokhaiotlHandler implements BossHandler {
     // Boulder shatter / rock-throw landing tiles -> expiry game tick.
     private final Map<WorldPoint, Integer> boulderTiles = new HashMap<>();
 
-    // Post-dash slam: the disc of tiles the next slam will hit, frozen at the tick
-    // its windup started, and the tick the hit lands on. Frozen rather than tracked
-    // live because the slam comes from where the dash left the boss, and deliberately
+    // Post-dash slam: the tick its hit lands on and where it is centred, both set
+    // only by the windup animation, which carries the exact figure. Deliberately
     // kept out of the car-phase state below: the boss unburrows partway through the
     // countdown, which ends the car phase while the warning still has to be up.
-    private final Set<WorldPoint> slamAreaTiles = new HashSet<>();
-    // Set only by the windup animation, which carries the exact figure, so a value
-    // here always means the countdown is trustworthy. -1 while the area is up on the
-    // strength of a telegraph or a just-finished dash alone.
     private int slamImpactTick = -1;
-    // Tick the area expires at while no impact tick is known: the window between the
-    // dash finishing and the windup arriving. Keeps the area up across that handover
-    // without inventing an impact tick nothing could rely on.
-    private int slamAreaUntilTick = -1;
     private WorldPoint slamCentre;
-    // Whether the current dash has already had its slam window armed, so the area is
-    // built once when the dash path clears rather than rebuilt every tick after it.
-    private boolean slamArmedThisDash;
-
-    // The centre slamAreaTiles was last built around, so the disc is only rebuilt
-    // when it actually moves rather than every tick the area is up.
-    private WorldPoint slamAreaBuiltFor;
 
     // Car-phase dash: the eye tile the boss dashes to and the corridor it tramples.
     private WorldPoint carEyeTile;
     private int carTelegraphUntilTick = -1;
     private final Set<WorldPoint> dashPathTiles = new HashSet<>();
-    private boolean carPhaseActive;
-    // Whether a dash has happened at all this car phase, so no slam window is armed
-    // before the phase's first dash (there is no slam coming yet).
-    private boolean carZoomSeen;
-    // Boss tile as of the previous tick, so a dash is still detected on the ticks its
-    // animation is missed (the boss only moves while dashing).
-    private WorldPoint lastBossTile;
+    // Tiles a boulder shields from the boss, so the dash cannot reach the player
+    // standing on them.
+    private final Set<WorldPoint> carSafeTiles = new HashSet<>();
+    // Tracked boulder ground objects (hash -> tile) for the LoS safe-tile check.
+    private final Map<Long, WorldPoint> boulderObjects = new HashMap<>();
+
+    // Candidate tiles for the first car-phase dash's eye, marked once when the boss
+    // spawns for a delve and then left alone until the next one. The delve they were
+    // locked in for is what makes that "once": a new delve re-marks them, every tick
+    // in between finds them already up.
+    private final Set<WorldPoint> eyeSpawnTiles = new HashSet<>();
+    private int eyeSpawnLockedDelve = -1;
+    private int eyeSpawnTick = -1;
+
+    // Statue sound loop state. A looping melee-punish alert that starts when a
+    // boulder projectile spawns while statues are present, and stops when the 2nd
+    // statue (near / rainbow tile) is attacked (turns red).
+    private boolean statueSoundActive;
 
     // Melee-punish charge state. The audio cue loops for as long as the charge is
     // up (the same window the red 5x5 tile is drawn) and stops the tick the player
@@ -310,7 +312,13 @@ public class MokhaiotlHandler implements BossHandler {
     // can outlive it, and the tiles of destroyed ones -> the tick they stop showing.
     private final Map<Integer, WorldPoint> attackedStatueTiles = new HashMap<>();
     private final Map<WorldPoint, Integer> destroyedStatueTiles = new HashMap<>();
-    private int shockwaveImpactTick = -1;
+    private int statueShockwaveExpiryTick = -1;
+    // Last direction tiles worked out while both statues of the pair were in the
+    // scene. Kept so the 3 marks outlive the statue NPCs and stay up for exactly as
+    // long as the shockwave countdown does, instead of blinking out early when a
+    // statue is destroyed or despawns.
+    private Set<WorldPoint> lastStatueDirectionTiles = Collections.emptySet();
+
     private boolean statuesPresentLastTick = false;
     // One diagnostic dump per shockwave phase when no pair can be picked at all.
     private boolean loggedNoStatuePairThisPhase = false;
@@ -369,14 +377,9 @@ public class MokhaiotlHandler implements BossHandler {
 
         // The post-dash slam windup, which carries the exact impact tick. Taken from
         // the animation rather than polled on the tick because it can start and
-        // finish between game ticks; the dash-end arming in updateCarPhase is what
-        // keeps a missed one from costing the warning entirely.
+        // finish between game ticks.
         if (npc.getId() == BOSS_BURROWED && anim == ANIM_BURROWED_EXPLOSION) {
             armSlam(npc, client.getTickCount() + SLAM_IMPACT_DELAY_TICKS);
-            // Also mark the dash handled, so that if this animation arrives on the
-            // same tick the dash path clears, the estimate in updateCarPhase cannot
-            // run afterwards and overwrite this exact impact tick with its own.
-            slamArmedThisDash = true;
         }
 
         if (!config.mokhaiotlVerboseLogging()) {
@@ -436,6 +439,13 @@ public class MokhaiotlHandler implements BossHandler {
                 boulderTiles.merge(landing, impactTick + BOULDER_TILE_HOLD_TICKS, Math::max);
             }
         }
+
+        // Boulder projectile spawning while statues are present -> start the
+        // statue sound loop (the same melee-punish alert, looped until the 2nd
+        // statue is hit).
+        if (BOULDER_PROJECTILE_IDS.contains(id) && statuesPresentLastTick) {
+            setStatueSoundActive(true);
+        }
     }
 
     @Override
@@ -460,7 +470,12 @@ public class MokhaiotlHandler implements BossHandler {
         // A hit the player deals to a volatile earth statue turns it blue (the
         // player has committed that statue as a shield endpoint).
         if (actor instanceof NPC && ((NPC) actor).getId() == STATUE_ID && event.getHitsplat().isMine()) {
-            attackedStatueIndices.add(((NPC) actor).getIndex());
+            int statueIdx = ((NPC) actor).getIndex();
+            attackedStatueIndices.add(statueIdx);
+            // The 2nd statue (near / rainbow tile) being hit stops the sound loop.
+            if (statueIdx == nearStatueIndex) {
+                setStatueSoundActive(false);
+            }
         }
         if (config.mokhaiotlVerboseLogging() && actor == client.getLocalPlayer() && isInBossArea(client)) {
             log.info("Mokhaiotl player hitsplat type {} amount {} at tick {} pending {}",
@@ -488,8 +503,25 @@ public class MokhaiotlHandler implements BossHandler {
             return;
         }
         int id = obj.getId();
+        if (BOULDER_OBJECT_IDS.contains(id)) {
+            LocalPoint lp = obj.getLocalLocation();
+            if (lp != null) {
+                boulderObjects.put(obj.getHash(), WorldPoint.fromLocal(client, lp));
+            }
+        }
         if (config.mokhaiotlVerboseLogging() && isInBossArea(client) && loggedObjectIds.add(id)) {
             log.info("Mokhaiotl area object spawned: id {} at {}", id, obj.getWorldLocation());
+        }
+    }
+
+    public void onGameObjectDespawned(GameObjectDespawned event) {
+        GameObject obj = event.getGameObject();
+        if (obj == null) {
+            return;
+        }
+        int id = obj.getId();
+        if (BOULDER_OBJECT_IDS.contains(id)) {
+            boulderObjects.remove(obj.getHash());
         }
     }
 
@@ -508,6 +540,9 @@ public class MokhaiotlHandler implements BossHandler {
         updateDepthTracking(boss, currentTick);
         updatePhase(boss);
         pruneExpiredState(currentTick);
+        // After updatePhase, so a burrowed boss can be recognised and skipped, and
+        // after updateDepthTracking, so the delve the marks are locked for is current.
+        updateEyeSpawnCandidates(boss, currentTick);
         updateCarPhase(boss, currentTick);
         updateStatuePhase(currentTick);
 
@@ -632,12 +667,14 @@ public class MokhaiotlHandler implements BossHandler {
         // The varp is the absolute delve number, which the count-the-respawns
         // heuristic below cannot be (entering at delve 5 would still read as 1), so
         // prefer it whenever it gives a plausible value.
+        // NOTE: The varp tracks completed delves (0 on delve 1), so add 1 for the actual level.
         int varpLevel = readDelveLevelVarp();
         if (varpLevel > 0) {
-            if (varpLevel != depthLevel) {
-                log.info("Mokhaiotl: delve/depth level {} (varp)", varpLevel);
+            int actualDelve = varpLevel + 1;
+            if (actualDelve != depthLevel) {
+                log.info("Mokhaiotl: delve/depth level {} (varp read {})", actualDelve, varpLevel);
             }
-            depthLevel = varpLevel;
+            depthLevel = actualDelve;
             bossSeenEver = bossSeenEver || boss != null;
             if (boss != null) {
                 lastBossSeenTick = currentTick;
@@ -661,9 +698,8 @@ public class MokhaiotlHandler implements BossHandler {
     // The delve depth from the game's own varps, or -1 when neither reads sanely.
     private int readDelveLevelVarp() {
         int level = client.getVarpValue(VARP_DOM_CURRENT_LEVEL);
-        if (level <= 0) {
-            level = client.getVarpValue(VARP_DOM_LAST_DELVE_LEVEL);
-        }
+        // Do not fallback to LAST_DELVE_LEVEL when level is 0, because 0 means delve 1.
+        // A fallback here would incorrectly pull the previous run's depth into a new run.
         return level > 0 && level <= MAX_PLAUSIBLE_DELVE ? level : -1;
     }
 
@@ -703,11 +739,23 @@ public class MokhaiotlHandler implements BossHandler {
     // red boss tile is shown. Calling loop() every tick is a no-op while it plays.
     private void setMeleePunishActive(boolean active) {
         meleePunishActive = active;
-        if (!active || !config.mokhaiotlMeleePunishSound()) {
+    }
+
+    // Tracks the statue sound loop: started when a boulder projectile spawns while
+    // statues are present, and stopped when the 2nd statue (near / rainbow tile) is
+    // attacked. Reuses the same melee-punish sound and volume config.
+    private void setStatueSoundActive(boolean active) {
+        statueSoundActive = active;
+        updateSharedSoundLoop();
+    }
+
+    private void updateSharedSoundLoop() {
+        boolean shouldPlay = statueSoundActive && config.mokhaiotlWarningSounds();
+        if (shouldPlay) {
+            SoundPlayer.loop(MELEE_PUNISH_SOUND, config.mokhaiotlWarningSoundsVolume());
+        } else {
             SoundPlayer.stopLoop(MELEE_PUNISH_SOUND);
-            return;
         }
-        SoundPlayer.loop(MELEE_PUNISH_SOUND, config.mokhaiotlMeleePunishSoundVolume());
     }
 
     private void pruneExpiredState(int currentTick) {
@@ -718,169 +766,40 @@ public class MokhaiotlHandler implements BossHandler {
         boulderTiles.entrySet().removeIf(en -> en.getValue() < currentTick);
         destroyedStatueTiles.entrySet().removeIf(en -> en.getValue() < currentTick);
 
-        // Drop the slam area a couple of ticks after the hit has landed, or when a
-        // dash finished and the windup never turned up to say when that would be.
-        // Each dash sets this up again, so a later slam simply replaces it.
-        if (slamImpactTick >= 0) {
-            if (currentTick > slamImpactTick + SLAM_AREA_HOLD_TICKS) {
-                clearSlamArea();
-            }
-        } else if (slamAreaUntilTick >= 0 && currentTick > slamAreaUntilTick) {
-            clearSlamArea();
+        if (statueShockwaveExpiryTick >= 0 && currentTick > statueShockwaveExpiryTick) {
+            statueShockwaveExpiryTick = -1;
+        }
+
+        // Drop the slam countdown a couple of ticks after the hit has landed. Each
+        // dash arms it again, so a later slam simply replaces it.
+        if (slamImpactTick >= 0 && currentTick > slamImpactTick + SLAM_TIMER_HOLD_TICKS) {
+            clearSlam();
         }
     }
 
     // ------------------------------------------------------------------
-    // Post-dash slam area
+    // Post-dash slam countdown
     // ------------------------------------------------------------------
-
-    /**
-     * Re-centre the area on the boss now its dash has finished, and hold it there
-     * while the windup animation is awaited. No countdown starts here: the impact
-     * tick is not knowable yet, and the overlay only shows the number for the last
-     * few ticks, which are always inside the window the windup has already defined.
-     *
-     * <p>Without this the area would blink out for the tick or two between the
-     * telegraph clearing and the windup arriving.
-     */
-    private void holdSlamAreaForWindup(NPC boss, int currentTick) {
-        WorldPoint centre = bossCentre(boss);
-        if (centre == null) {
-            return;
-        }
-        slamAreaUntilTick = currentTick + SLAM_WINDUP_WAIT_TICKS;
-        setSlamArea(centre);
-    }
 
     // Start the countdown from the windup animation, the one source of an exact
-    // impact tick, re-centring on the boss in case the dash-end hold was missed.
+    // impact tick, anchored on the boss's centre tile now the dash has landed it
+    // there. The hit itself covers the whole arena, so only the timing is drawn.
     private void armSlam(NPC boss, int impactTick) {
         WorldPoint centre = bossCentre(boss);
         if (centre == null) {
             return;
         }
         if (config.mokhaiotlVerboseLogging()) {
-            log.info("Mokhaiotl slam windup at tick {}, impact {} ({} ticks), area was {}",
-                    client.getTickCount(), impactTick, impactTick - client.getTickCount(),
-                    slamAreaTiles.isEmpty() ? "not up" : "already up on " + slamAreaBuiltFor);
+            log.info("Mokhaiotl slam windup at tick {}, impact {} ({} ticks)",
+                    client.getTickCount(), impactTick, impactTick - client.getTickCount());
         }
         slamImpactTick = impactTick;
-        slamAreaUntilTick = -1;
-        setSlamArea(centre);
-    }
-
-    /**
-     * Keep the area up for a dash that is still telegraphed, centred on the eye tile
-     * the boss is about to dash to. The eye always ends up stacked under the boss's
-     * centre tile, so it is exactly where the slam will come from - not an estimate
-     * of it - which is why the area can be drawn in full this early and does not
-     * shift when {@link #holdSlamAreaForWindup} re-centres on the landed boss.
-     *
-     * <p>This is what gets the area on screen as early as the dash is known about,
-     * rather than only once it has landed. It is the same area drawn the same way;
-     * only the countdown waits for the windup.
-     */
-    private void updateSlamForecast() {
-        // Once a dash has finished, the area belongs to the boss's landed position -
-        // whether it is counting down yet or still waiting on the windup - so never
-        // move it back onto an eye tile.
-        if (slamImpactTick >= 0 || slamAreaUntilTick >= 0) {
-            return;
-        }
-        if (carEyeTile == null) {
-            clearSlamArea();
-        } else if (!carEyeTile.equals(slamAreaBuiltFor)) {
-            setSlamArea(carEyeTile);
-        }
-    }
-
-    private void setSlamArea(WorldPoint centre) {
         slamCentre = centre;
-        slamAreaBuiltFor = centre;
-        slamAreaTiles.clear();
-        slamAreaTiles.addAll(clippedSlamDisc(centre));
     }
 
-    private void clearSlamArea() {
-        slamAreaTiles.clear();
+    private void clearSlam() {
         slamCentre = null;
-        slamAreaBuiltFor = null;
         slamImpactTick = -1;
-        slamAreaUntilTick = -1;
-    }
-
-    // The slam disc around a centre, clipped to floor that actually exists. The disc
-    // reaches well past the arena from most positions, and without the clip the
-    // highlight spills over the void around it and stops reading as the arena's shape.
-    private Set<WorldPoint> clippedSlamDisc(WorldPoint centre) {
-        Set<WorldPoint> tiles = new HashSet<>();
-        for (WorldPoint tile : slamDisc(centre)) {
-            if (isWalkable(tile)) {
-                tiles.add(tile);
-            }
-        }
-        return tiles;
-    }
-
-    /**
-     * Whether this is the tick to put the slam area up, given what the car phase is
-     * doing. True exactly when the dash path highlight stops being drawn after a
-     * dash: {@code rebuildDashPath} produces tiles only while a telegraph is up, so
-     * handing over on {@code !telegraphUp} is what makes the two highlights meet with
-     * no gap and no overlap.
-     *
-     * @param zooming      a dash is in progress, so the boss is not yet where the
-     *                     slam will come from
-     * @param telegraphUp  the eye telegraph is up, i.e. the dash path is on screen
-     * @param dashSeen     this car phase has dashed at least once, so a slam is
-     *                     actually coming
-     * @param alreadyArmed this dash's slam window has already been armed, by an
-     *                     earlier tick or by the windup animation
-     */
-    static boolean shouldArmSlamWindow(boolean zooming, boolean telegraphUp, boolean dashSeen,
-            boolean alreadyArmed) {
-        return !zooming && !telegraphUp && dashSeen && !alreadyArmed;
-    }
-
-    /**
-     * Every tile the slam hits, unclipped: the disc {@code dx*dx + dy*dy <=}
-     * {@link #SLAM_RADIUS_SQ} around {@code centre}.
-     *
-     * <p>A disc rather than a square, which is the whole reason this is worth
-     * drawing: it reaches 15 tiles along the axes but only 11 diagonally, so the
-     * corners of the arena can be out of range while its edges are not.
-     */
-    static Set<WorldPoint> slamDisc(WorldPoint centre) {
-        Set<WorldPoint> tiles = new HashSet<>();
-        int r = (int) Math.floor(Math.sqrt(SLAM_RADIUS_SQ));
-        for (int dx = -r; dx <= r; dx++) {
-            for (int dy = -r; dy <= r; dy++) {
-                if (dx * dx + dy * dy <= SLAM_RADIUS_SQ) {
-                    tiles.add(new WorldPoint(centre.getX() + dx, centre.getY() + dy,
-                            centre.getPlane()));
-                }
-            }
-        }
-        return tiles;
-    }
-
-    // In the loaded scene and not fully blocked. Used only to clip the slam disc to
-    // real floor, so a tile with acid or anything else on it still counts - it is
-    // part of the hit area whether or not it is somewhere worth standing.
-    private boolean isWalkable(WorldPoint tile) {
-        LocalPoint lp = LocalPoint.fromWorld(client, tile);
-        if (lp == null || !lp.isInScene()) {
-            return false;
-        }
-        CollisionData[] maps = client.getTopLevelWorldView().getCollisionMaps();
-        if (maps == null || tile.getPlane() < 0 || tile.getPlane() >= maps.length
-                || maps[tile.getPlane()] == null) {
-            // No collision data to judge by, so keep the tile rather than punching a
-            // hole in the area.
-            return true;
-        }
-        int[][] flags = maps[tile.getPlane()].getFlags();
-        return (flags[lp.getSceneX()][lp.getSceneY()] & CollisionDataFlag.BLOCK_MOVEMENT_FULL) == 0;
     }
 
     // ------------------------------------------------------------------
@@ -893,16 +812,6 @@ public class MokhaiotlHandler implements BossHandler {
             return;
         }
 
-        WorldPoint bossTile = boss.getWorldLocation();
-        if (!carPhaseActive) {
-            // First tick of the phase. Seeding lastBossTile here keeps the boss
-            // simply being in a new spot from reading as a dash that just finished.
-            carPhaseActive = true;
-            carZoomSeen = false;
-            slamArmedThisDash = false;
-            lastBossTile = bossTile;
-        }
-
         // Locate the eye tile from its telegraph graphic each tick it is present.
         WorldPoint eye = findCarEyeTile();
         if (eye != null) {
@@ -912,47 +821,154 @@ public class MokhaiotlHandler implements BossHandler {
             carEyeTile = null;
         }
 
-        // The dash animation is short enough that a tick of it can fall between game
-        // ticks, so the boss having moved counts as a dash too - it only moves while
-        // dashing.
-        boolean moved = bossTile != null && lastBossTile != null && !bossTile.equals(lastBossTile);
-        boolean zooming = boss.getAnimation() == ANIM_BURROWED_MOVEMENT || moved;
-        lastBossTile = bossTile;
-        if (zooming) {
-            carZoomSeen = true;
-            // A fresh dash is its own attack, so the next slam window arms again.
-            slamArmedThisDash = false;
-        }
-
-        // Arm the slam area the moment the dash path highlight comes down, so the two
-        // hand over with no gap. Gating on exactly what the dash path is drawn from -
-        // a telegraph being up, or a dash in progress - is what guarantees that: the
-        // tick carEyeTile goes null is the tick rebuildDashPath stops producing tiles.
-        // The windup animation arrives a tick or two later and re-arms with the exact
-        // impact tick, so this only has to get the area up and the countdown started.
-        if (shouldArmSlamWindow(zooming, carEyeTile != null, carZoomSeen, slamArmedThisDash)) {
-            slamArmedThisDash = true;
-            holdSlamAreaForWindup(boss, currentTick);
-        }
-
-        updateSlamForecast();
         rebuildDashPath(boss);
+        // Only ever one of the two on screen. While a dash is telegraphed the path
+        // is the whole answer - it says exactly which tiles are about to be hit - so
+        // the safe tiles would only clutter it. They come back the moment it clears,
+        // which is the window they are actually acted on: picking where to stand
+        // before the next dash is telegraphed.
+        if (dashPathTiles.isEmpty()) {
+            rebuildCarSafeTiles(boss);
+        } else {
+            carSafeTiles.clear();
+        }
+    }
+
+    // Tiles within CAR_SAFE_SEARCH_RADIUS of the player that a boulder shields from
+    // the boss: the straight line from the boss centre to the tile is blocked by a
+    // tracked boulder, so the dash cannot reach the player there.
+    private void rebuildCarSafeTiles(NPC boss) {
+        carSafeTiles.clear();
+        if (boulderObjects.isEmpty()) {
+            return;
+        }
+        Player local = client.getLocalPlayer();
+        if (local == null) {
+            return;
+        }
+        WorldPoint playerLoc = local.getWorldLocation();
+        net.runelite.api.coords.WorldArea area = boss.getWorldArea();
+        if (playerLoc == null || area == null) {
+            return;
+        }
+        WorldPoint bossCentre = new WorldPoint(area.getX() + area.getWidth() / 2,
+                area.getY() + area.getHeight() / 2, playerLoc.getPlane());
+        Set<WorldPoint> boulderTileSet = new HashSet<>(boulderObjects.values());
+
+        for (int dx = -CAR_SAFE_SEARCH_RADIUS; dx <= CAR_SAFE_SEARCH_RADIUS; dx++) {
+            for (int dy = -CAR_SAFE_SEARCH_RADIUS; dy <= CAR_SAFE_SEARCH_RADIUS; dy++) {
+                WorldPoint candidate = new WorldPoint(playerLoc.getX() + dx, playerLoc.getY() + dy,
+                        playerLoc.getPlane());
+                if (boulderTileSet.contains(candidate)) {
+                    continue;
+                }
+                if (lineBlockedByBoulder(bossCentre, candidate, boulderTileSet)) {
+                    carSafeTiles.add(candidate);
+                }
+            }
+        }
+    }
+
+    // Bresenham line walk from -> to; true if any intermediate tile carries a
+    // boulder (i.e. the boulder sits between the boss and the candidate tile).
+    private boolean lineBlockedByBoulder(WorldPoint from, WorldPoint to, Set<WorldPoint> boulders) {
+        int x0 = from.getX();
+        int y0 = from.getY();
+        int x1 = to.getX();
+        int y1 = to.getY();
+        int dx = Math.abs(x1 - x0);
+        int dy = Math.abs(y1 - y0);
+        int sx = x0 < x1 ? 1 : -1;
+        int sy = y0 < y1 ? 1 : -1;
+        int err = dx - dy;
+        int x = x0;
+        int y = y0;
+        while (x != x1 || y != y1) {
+            int e2 = 2 * err;
+            if (e2 > -dy) {
+                err -= dy;
+                x += sx;
+            }
+            if (e2 < dx) {
+                err += dx;
+                y += sy;
+            }
+            if (x == x1 && y == y1) {
+                break;
+            }
+            if (boulders.contains(new WorldPoint(x, y, from.getPlane()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ------------------------------------------------------------------
+    // First-dash eye candidates
+    // ------------------------------------------------------------------
+
+    /**
+     * Mark where the delve's first car-phase dash could send its eye, once, on the
+     * tick the boss first appears for that delve. The tiles stay put for the rest of
+     * the delve and are re-marked for the next one.
+     *
+     * <p>Only the four cardinal rays are marked, at
+     * {@link #CAR_EYE_DASH_DISTANCE} tiles. The dash does also go diagonally - see
+     * {@link #cardinalEyeCandidates} - so these are four of the eight tiles it
+     * picks from.
+     */
+    private void updateEyeSpawnCandidates(NPC boss, int currentTick) {
+        if (boss == null || depthLevel == eyeSpawnLockedDelve) {
+            return;
+        }
+        // Never lock in off a burrowed boss: that one is mid-car-phase and so has
+        // already left the centre it spawned on.
+        if (boss.getId() == BOSS_BURROWED) {
+            return;
+        }
+        WorldPoint centre = bossCentre(boss);
+        if (centre == null) {
+            return;
+        }
+        eyeSpawnLockedDelve = depthLevel;
+        eyeSpawnTick = currentTick;
+        eyeSpawnTiles.clear();
+        eyeSpawnTiles.addAll(cardinalEyeCandidates(centre));
+        if (config.mokhaiotlVerboseLogging()) {
+            log.info("Mokhaiotl first-dash eye candidates locked for delve {} at tick {} around {}: {}",
+                    depthLevel, currentTick, centre, eyeSpawnTiles);
+        }
+    }
+
+    /**
+     * The four tiles {@link #CAR_EYE_DASH_DISTANCE} north, east, south and west of
+     * {@code centre}.
+     *
+     * <p>Measured off client.log rather than assumed: the boss dashes along one of
+     * the eight compass rays and lands exactly on its eye tile, so the eye is always
+     * on a ray. Of the 12 dashes measured, 6 were cardinal and 6 were pure diagonal,
+     * and the length was 10 for 7 of them (the rest 8, 9, 11 and 12). So these four
+     * tiles are the cardinal half of the picture, marked one tile in from that
+     * modal length.
+     */
+    static Set<WorldPoint> cardinalEyeCandidates(WorldPoint centre) {
+        Set<WorldPoint> tiles = new HashSet<>();
+        int d = CAR_EYE_DASH_DISTANCE;
+        tiles.add(new WorldPoint(centre.getX(), centre.getY() + d, centre.getPlane()));
+        tiles.add(new WorldPoint(centre.getX(), centre.getY() - d, centre.getPlane()));
+        tiles.add(new WorldPoint(centre.getX() + d, centre.getY(), centre.getPlane()));
+        tiles.add(new WorldPoint(centre.getX() - d, centre.getY(), centre.getPlane()));
+        return tiles;
     }
 
     private void resetCarPhaseState() {
         carEyeTile = null;
         carTelegraphUntilTick = -1;
         dashPathTiles.clear();
-        carPhaseActive = false;
-        carZoomSeen = false;
-        slamArmedThisDash = false;
-        lastBossTile = null;
-        // A slam counting down, or a dash waiting on its windup, outlives the car
-        // phase: the boss unburrows partway through. Only an area held for a
-        // telegraph that has gone away with the phase goes here.
-        if (slamImpactTick < 0 && slamAreaUntilTick < 0) {
-            clearSlamArea();
-        }
+        carSafeTiles.clear();
+        // The slam countdown deliberately survives: the boss unburrows partway
+        // through it, which ends the car phase while the warning still has to be up.
+        // pruneExpiredState is what takes it down, a couple of ticks after the hit.
     }
 
     private WorldPoint findCarEyeTile() {
@@ -1042,13 +1058,12 @@ public class MokhaiotlHandler implements BossHandler {
 
         boolean present = !statues.isEmpty();
         if (present && !statuesPresentLastTick) {
-            shockwaveImpactTick = currentTick + SHOCKWAVE_TIMER_TICKS;
             attackedStatueIndices.clear();
             attackedStatueTiles.clear();
             loggedNoStatuePairThisPhase = false;
+            statueShockwaveExpiryTick = currentTick + 16;
             if (config.mokhaiotlVerboseLogging()) {
-                log.info("Mokhaiotl: {} volatile earth statues spawned, shockwave in ~{} ticks",
-                        statues.size(), SHOCKWAVE_TIMER_TICKS);
+                log.info("Mokhaiotl: {} volatile earth statues spawned", statues.size());
             }
         }
 
@@ -1059,11 +1074,13 @@ public class MokhaiotlHandler implements BossHandler {
             attackedStatueIndices.clear();
             farStatueIndex = -1;
             nearStatueIndex = -1;
-            shockwaveImpactTick = -1;
+            setStatueSoundActive(false);
+            statueShockwaveExpiryTick = -1;
         } else if (highlightedStatueIndices.isEmpty()) {
             // Only until a pair is found: the choice is then locked in, so it never
-            // re-picks as the player walks towards the statues.
-            computeClosestStraightPair(statues);
+            // re-picks as the player walks towards the statues. The boss cannot move
+            // during this phase, so a pair clear of it at pick time stays clear.
+            computeClosestStraightPair(statues, findBoss());
         }
 
         statuesPresentLastTick = present;
@@ -1072,11 +1089,17 @@ public class MokhaiotlHandler implements BossHandler {
     // Keep the tile of every statue the player has hit, and when one of them leaves
     // the scene leave its red marker behind for a few ticks so the player can still
     // see where it stood.
+    //
+    // The starting statue is deliberately excluded. It reads green while it is the
+    // live target and then goes away for good, so a red "attacked" marker left at its
+    // tile a few ticks later would wrongly point the player back at an endpoint they
+    // are already done with. Only the destination statue leaves a red marker behind.
     private void trackDestroyedStatues(List<NPC> statues, int currentTick) {
         Set<Integer> presentIndices = new HashSet<>();
         for (NPC statue : statues) {
             presentIndices.add(statue.getIndex());
-            if (attackedStatueIndices.contains(statue.getIndex())) {
+            if (attackedStatueIndices.contains(statue.getIndex())
+                    && !isStartingStatue(statue)) {
                 WorldPoint tile = statue.getWorldLocation();
                 if (tile != null) {
                     attackedStatueTiles.put(statue.getIndex(), tile);
@@ -1098,22 +1121,51 @@ public class MokhaiotlHandler implements BossHandler {
     // travels in one cardinal direction with no diagonal step) at least
     // MIN_STATUE_PAIR_DISTANCE tiles apart. Only one pair is ever highlighted: the
     // one with a statue nearest the player, so the walk starts from where you stand.
-    private void computeClosestStraightPair(List<NPC> statues) {
+    //
+    // Lower (tighter) tiers are slightly preferred: a higher-tier pair must have its
+    // near-statue at least TIER_PROXIMITY_ADVANTAGE tiles closer to the player per
+    // tier step to beat a lower-tier pair. This keeps statue separation as the
+    // primary factor while giving nearby but slightly relaxed pairs a chance.
+    private static final int TIER_PROXIMITY_ADVANTAGE = 3;
+
+    private void computeClosestStraightPair(List<NPC> statues, NPC boss) {
         List<Integer> previous = new ArrayList<>(highlightedStatueIndices);
         highlightedStatueIndices.clear();
 
         Player local = client.getLocalPlayer();
         WorldPoint playerLoc = local == null ? null : local.getWorldLocation();
 
-        farStatueIndex = -1;
-        nearStatueIndex = -1;
-        int bestNear = Integer.MAX_VALUE;
-        int bestFar = Integer.MAX_VALUE;
-        int usedTier = -1;
+        // Throw away the statues standing on the boss before any pairing is tried, so
+        // no relaxation tier can fall back onto one. Such an endpoint is unusable:
+        // reaching it means standing in the 5x5 melee-punish footprint.
+        WorldPoint bossCentre = bossCentre(boss);
+        List<NPC> excluded = new ArrayList<>();
+        if (bossCentre != null) {
+            List<NPC> usable = new ArrayList<>(statues.size());
+            for (NPC statue : statues) {
+                if (overlapsBossFootprint(statue, bossCentre)) {
+                    excluded.add(statue);
+                } else {
+                    usable.add(statue);
+                }
+            }
+            statues = usable;
+        }
 
-        // Try the strict rule first and only relax it when nothing matches, so a
-        // normal layout still picks exactly the pair it always did.
-        for (int tier = 0; tier < STATUE_PAIR_TIERS.length && farStatueIndex < 0; tier++) {
+        // Collect the best candidate from each tier so they can be compared across
+        // tiers with a proximity advantage bias toward lower (tighter) tiers.
+        int[] tierBestNear = new int[STATUE_PAIR_TIERS.length];
+        int[] tierBestFar = new int[STATUE_PAIR_TIERS.length];
+        int[] tierNearIdx = new int[STATUE_PAIR_TIERS.length];
+        int[] tierFarIdx = new int[STATUE_PAIR_TIERS.length];
+        for (int t = 0; t < STATUE_PAIR_TIERS.length; t++) {
+            tierBestNear[t] = Integer.MAX_VALUE;
+            tierBestFar[t] = Integer.MAX_VALUE;
+            tierNearIdx[t] = -1;
+            tierFarIdx[t] = -1;
+        }
+
+        for (int tier = 0; tier < STATUE_PAIR_TIERS.length; tier++) {
             int maxOffAxis = STATUE_PAIR_TIERS[tier][0];
             int minDistance = STATUE_PAIR_TIERS[tier][1];
             // Rank by the nearer statue of the pair, then by the further one so a tie
@@ -1129,18 +1181,57 @@ public class MokhaiotlHandler implements BossHandler {
                             || !isStraightPair(a, b, maxOffAxis, minDistance)) {
                         continue;
                     }
+                    if (bossCentre != null && pathOverlapsBossFootprint(a, b, bossCentre)) {
+                        continue;
+                    }
                     int distA = playerLoc == null ? 0 : playerLoc.distanceTo(a);
                     int distB = playerLoc == null ? 0 : playerLoc.distanceTo(b);
                     int near = Math.min(distA, distB);
                     int far = Math.max(distA, distB);
-                    if (near < bestNear || (near == bestNear && far < bestFar)) {
-                        bestNear = near;
-                        bestFar = far;
+                    if (near < tierBestNear[tier] || (near == tierBestNear[tier] && far < tierBestFar[tier])) {
+                        tierBestNear[tier] = near;
+                        tierBestFar[tier] = far;
                         boolean aIsNearer = distA <= distB;
-                        nearStatueIndex = statues.get(aIsNearer ? i : j).getIndex();
-                        farStatueIndex = statues.get(aIsNearer ? j : i).getIndex();
-                        usedTier = tier;
+                        tierNearIdx[tier] = statues.get(aIsNearer ? i : j).getIndex();
+                        tierFarIdx[tier] = statues.get(aIsNearer ? j : i).getIndex();
                     }
+                }
+            }
+        }
+
+        // Pick across tiers: start with the lowest (tightest) tier that found a pair,
+        // then let a higher tier beat it only if its near-statue is meaningfully closer
+        // to the player (TIER_PROXIMITY_ADVANTAGE tiles per tier step).
+        farStatueIndex = -1;
+        nearStatueIndex = -1;
+        int bestNear = Integer.MAX_VALUE;
+        int bestFar = Integer.MAX_VALUE;
+        int usedTier = -1;
+
+        for (int tier = 0; tier < STATUE_PAIR_TIERS.length; tier++) {
+            if (tierFarIdx[tier] < 0) {
+                continue;
+            }
+            if (usedTier < 0) {
+                // First tier with a pair: accept unconditionally.
+                usedTier = tier;
+                bestNear = tierBestNear[tier];
+                bestFar = tierBestFar[tier];
+                nearStatueIndex = tierNearIdx[tier];
+                farStatueIndex = tierFarIdx[tier];
+            } else {
+                // A higher tier must save at least TIER_PROXIMITY_ADVANTAGE tiles per
+                // tier step on the near-statue distance to justify the relaxation.
+                int tierGap = tier - usedTier;
+                int requiredAdvantage = tierGap * TIER_PROXIMITY_ADVANTAGE;
+                if (tierBestNear[tier] + requiredAdvantage < bestNear
+                        || (tierBestNear[tier] + requiredAdvantage == bestNear
+                            && tierBestFar[tier] < bestFar)) {
+                    usedTier = tier;
+                    bestNear = tierBestNear[tier];
+                    bestFar = tierBestFar[tier];
+                    nearStatueIndex = tierNearIdx[tier];
+                    farStatueIndex = tierFarIdx[tier];
                 }
             }
         }
@@ -1154,8 +1245,10 @@ public class MokhaiotlHandler implements BossHandler {
             return;
         }
         if (!previous.equals(highlightedStatueIndices) && farStatueIndex >= 0) {
-            log.info("Mokhaiotl: statue pair locked in (tier {}) - far {} ({} tiles), near {} ({} tiles), of {} statues",
-                    usedTier, farStatueIndex, bestFar, nearStatueIndex, bestNear, statues.size());
+            log.info("Mokhaiotl: statue pair locked in (tier {}) - far {} ({} tiles), near {} ({} tiles),"
+                            + " of {} usable statues ({} skipped as on the boss)",
+                    usedTier, farStatueIndex, bestFar, nearStatueIndex, bestNear, statues.size(),
+                    excluded.size());
         } else if (farStatueIndex < 0 && !loggedNoStatuePairThisPhase) {
             // Previously this case logged nothing at all, which is why the failure was
             // invisible in client.log. Dump the layout so it can be diagnosed.
@@ -1166,8 +1259,13 @@ public class MokhaiotlHandler implements BossHandler {
                 tiles.add(statue.getIndex() + "@" + (tile == null ? "null"
                         : tile.getX() + "," + tile.getY() + "," + tile.getPlane()));
             }
-            log.info("Mokhaiotl: NO statue pair found among {} statues (player {}): {}",
-                    statues.size(), playerLoc, tiles);
+            List<String> skipped = new ArrayList<>();
+            for (NPC statue : excluded) {
+                skipped.add(String.valueOf(statue.getIndex()));
+            }
+            log.info("Mokhaiotl: NO statue pair found among {} usable statues (player {}, bossCentre {}): {}"
+                            + " - {} skipped as on the boss: {}",
+                    statues.size(), playerLoc, bossCentre, tiles, skipped.size(), skipped);
         }
     }
 
@@ -1180,9 +1278,71 @@ public class MokhaiotlHandler implements BossHandler {
         return !attackedStatueIndices.contains(farStatueIndex);
     }
 
+    public boolean isStartingStatue(NPC npc) {
+        return npc != null && npc.getIndex() == nearStatueIndex;
+    }
+
     // Tiles of statues the player destroyed, held briefly after they despawn.
     public Set<WorldPoint> getDestroyedStatueTiles() {
         return new HashSet<>(destroyedStatueTiles.keySet());
+    }
+
+    // True when a statue's 3x3 footprint overlaps the boss's 5x5 plus a 1-tile buffer ring,
+    // which makes it unusable as an orb endpoint. This prevents selecting a pair where
+    // attacking the statue puts the player in melee range of the boss.
+    private static boolean overlapsBossFootprint(NPC statue, WorldPoint bossCentre) {
+        if (statue == null || bossCentre == null) {
+            return false;
+        }
+        net.runelite.api.coords.WorldArea area = statue.getWorldArea();
+        if (area != null) {
+            return overlapsBossFootprint(new WorldPoint(area.getX(), area.getY(), area.getPlane()),
+                    Math.max(area.getWidth(), area.getHeight()), bossCentre);
+        }
+        return overlapsBossFootprint(statue.getWorldLocation(), 1, bossCentre);
+    }
+
+    // Footprint overlap in tiles: the statue effectively acts as a 3x3 area, and the
+    // boss has a 5x5 area. Compared centre to centre, with a 2-tile buffer added to
+    // the boss's half-size so that attacking the statue doesn't put the player in
+    // melee range. That ring is wider than the 5x5 itself: a statue merely flush
+    // against the boss is still excluded, which is deliberate.
+    static boolean overlapsBossFootprint(WorldPoint statueSouthWest, int size, WorldPoint bossCentre) {
+        if (statueSouthWest == null || bossCentre == null
+                || statueSouthWest.getPlane() != bossCentre.getPlane()) {
+            return false;
+        }
+        
+        int statueCx = statueSouthWest.getX() + size / 2;
+        int statueCy = statueSouthWest.getY() + size / 2;
+
+        int dx = Math.abs(statueCx - bossCentre.getX());
+        int dy = Math.abs(statueCy - bossCentre.getY());
+
+        return dx <= BOSS_HALF_SIZE + 2 && dy <= BOSS_HALF_SIZE + 2;
+    }
+
+    // True when the 3x3 orb path between two statues overlaps the boss's 5x5 footprint plus a 1-tile buffer ring.
+    // This prevents pairing two statues if moving between them would force the player into melee range of the boss.
+    static boolean pathOverlapsBossFootprint(WorldPoint a, WorldPoint b, WorldPoint bossCentre) {
+        if (a == null || b == null || bossCentre == null || a.getPlane() != bossCentre.getPlane()) {
+            return false;
+        }
+
+        // A statue footprint is 3x3 with 'a' and 'b' being the south-west tiles.
+        // The path bounding box covers from minX to maxX + 2, and minY to maxY + 2.
+        int minX = Math.min(a.getX(), b.getX());
+        int maxX = Math.max(a.getX(), b.getX());
+        int minY = Math.min(a.getY(), b.getY());
+        int maxY = Math.max(a.getY(), b.getY());
+
+        // The boss footprint is a 5x5 area, but we enforce a 1-tile buffer (7x7 total) to avoid melee range.
+        // It covers X from bossX - (BOSS_HALF_SIZE + 1) to bossX + (BOSS_HALF_SIZE + 1), and similarly for Y.
+        int bufferedBossHalfSize = BOSS_HALF_SIZE + 1;
+        boolean overlapX = (maxX + 2 >= bossCentre.getX() - bufferedBossHalfSize) && (minX <= bossCentre.getX() + bufferedBossHalfSize);
+        boolean overlapY = (maxY + 2 >= bossCentre.getY() - bufferedBossHalfSize) && (minY <= bossCentre.getY() + bufferedBossHalfSize);
+
+        return overlapX && overlapY;
     }
 
     // Axis-aligned (never diagonal) and far enough apart to be worth the walk.
@@ -1295,6 +1455,10 @@ public class MokhaiotlHandler implements BossHandler {
         return depthLevel;
     }
 
+    public int getEyeSpawnTick() {
+        return eyeSpawnTick;
+    }
+
     public boolean isShieldPhase() {
         return phase == Phase.SHIELD;
     }
@@ -1319,6 +1483,12 @@ public class MokhaiotlHandler implements BossHandler {
         return new HashSet<>(boulderTiles.keySet());
     }
 
+    // Tiles currently occupied by a boulder ground object (used by the overlay to
+    // keep eye-spawn marks alive only where a boulder is sitting during shield phase).
+    public Set<WorldPoint> getBoulderObjectTiles() {
+        return new HashSet<>(boulderObjects.values());
+    }
+
     public WorldPoint getCarEyeTile() {
         return carEyeTile;
     }
@@ -1327,21 +1497,31 @@ public class MokhaiotlHandler implements BossHandler {
         return new HashSet<>(dashPathTiles);
     }
 
-    // The disc the pending post-dash slam will hit, or empty when none is pending.
-    public Set<WorldPoint> getSlamAreaTiles() {
-        return new HashSet<>(slamAreaTiles);
+    // Tiles a boulder shields from the boss during a car phase.
+    public Set<WorldPoint> getCarSafeTiles() {
+        return new HashSet<>(carSafeTiles);
+    }
+
+    // Where the delve's first car-phase dash could send its eye, or empty before the
+    // boss has spawned for a delve.
+    public Set<WorldPoint> getEyeSpawnTiles() {
+        return new HashSet<>(eyeSpawnTiles);
     }
 
     // Ticks until the pending slam lands, or -1 when none is pending. Goes to 0 on
-    // the tick the hit lands and then negative through the area's hold ticks, so the
-    // countdown stops at 0 while the area itself stays up a moment longer.
+    // the tick the hit lands and then negative through the hold ticks, so the
+    // countdown stops at 0 while the number itself stays up a moment longer.
     public int getSlamTimer() {
         return slamImpactTick < 0 ? -1 : slamImpactTick - client.getTickCount();
     }
 
-    // Centre of the pending slam's disc, used to anchor its countdown text.
+    // Boss centre tile as of the windup, used to anchor the countdown text.
     public WorldPoint getSlamCentre() {
         return slamCentre;
+    }
+
+    public int getStatueShockwaveTimer() {
+        return statueShockwaveExpiryTick < 0 ? -1 : statueShockwaveExpiryTick - client.getTickCount();
     }
 
     // Where the slam is predicted to land while its dash is still telegraphed, or
@@ -1378,13 +1558,103 @@ public class MokhaiotlHandler implements BossHandler {
         return nearest;
     }
 
+    // A volatile earth statue that is not part of the highlighted pair. Only true
+    // once a pair has actually been locked in: with no pair picked every statue is
+    // still a candidate, so none of them may be taken out of the menu.
+    public boolean isUnhighlightedStatue(NPC npc) {
+        return npc != null && npc.getId() == STATUE_ID
+                && !highlightedStatueIndices.isEmpty()
+                && !highlightedStatueIndices.contains(npc.getIndex());
+    }
+
     public boolean isStatueAttacked(NPC npc) {
         return npc != null && attackedStatueIndices.contains(npc.getIndex());
     }
 
-    // Ticks until the shockwave lands, or -1 when no statues are present.
-    public int getShockwaveTimer() {
-        return shockwaveImpactTick < 0 ? -1 : shockwaveImpactTick - client.getTickCount();
+
+
+    // The 3 tiles off the near statue pointing along the pair, which show the way the
+    // earthen shield will travel. Tied to the shockwave countdown rather than to the
+    // statue NPCs: once worked out they are held for as long as the countdown runs,
+    // so they and the timer go away on the same tick.
+    public Set<WorldPoint> getStatueDirectionTiles() {
+        // Gated on the countdown the overlay actually shows, not just on the expiry
+        // tick being set: the field outlives the last drawn number by a tick, and
+        // reusing getStatueShockwaveTimer() here is what makes the two end together.
+        if (getStatueShockwaveTimer() < 0) {
+            lastStatueDirectionTiles = Collections.emptySet();
+            return Collections.emptySet();
+        }
+        if (nearStatueIndex < 0 || farStatueIndex < 0) {
+            return lastStatueDirectionTiles;
+        }
+        NPC nearStatue = null;
+        NPC farStatue = null;
+        for (NPC npc : client.getTopLevelWorldView().npcs()) {
+            if (npc != null && npc.getId() == STATUE_ID) {
+                if (npc.getIndex() == nearStatueIndex) nearStatue = npc;
+                if (npc.getIndex() == farStatueIndex) farStatue = npc;
+            }
+        }
+        if (nearStatue == null || farStatue == null) {
+            return lastStatueDirectionTiles;
+        }
+        WorldPoint nearLoc = nearStatue.getWorldLocation();
+        WorldPoint farLoc = farStatue.getWorldLocation();
+        if (nearLoc == null || farLoc == null) {
+            return lastStatueDirectionTiles;
+        }
+
+        int dx = farLoc.getX() - nearLoc.getX();
+        int dy = farLoc.getY() - nearLoc.getY();
+        
+        // Find the center of the 3x3 starting statue
+        WorldPoint center = nearLoc;
+        net.runelite.api.coords.WorldArea area = nearStatue.getWorldArea();
+        if (area != null) {
+            center = new WorldPoint(area.getX() + area.getWidth() / 2,
+                    area.getY() + area.getHeight() / 2, area.getPlane());
+        } else {
+            // Fallback assuming 3x3
+            center = nearLoc.dx(1).dy(1);
+        }
+
+        Set<WorldPoint> tiles = new HashSet<>();
+        
+        if (Math.abs(dx) > Math.abs(dy)) {
+            if (dx > 0) {
+                // East
+                tiles.add(center.dx(2).dy(-1));
+                tiles.add(center.dx(2).dy(0));
+                tiles.add(center.dx(2).dy(1));
+            } else {
+                // West
+                tiles.add(center.dx(-2).dy(-1));
+                tiles.add(center.dx(-2).dy(0));
+                tiles.add(center.dx(-2).dy(1));
+            }
+        } else if (dy != 0) {
+            if (dy > 0) {
+                // North
+                tiles.add(center.dx(-1).dy(2));
+                tiles.add(center.dx(0).dy(2));
+                tiles.add(center.dx(1).dy(2));
+            } else {
+                // South
+                tiles.add(center.dx(-1).dy(-2));
+                tiles.add(center.dx(0).dy(-2));
+                tiles.add(center.dx(1).dy(-2));
+            }
+        }
+
+        // A degenerate pair (no cardinal offset at all) yields nothing; keep whatever
+        // was last worked out rather than dropping the marks mid-countdown.
+        if (tiles.isEmpty()) {
+            return lastStatueDirectionTiles;
+        }
+
+        lastStatueDirectionTiles = tiles;
+        return tiles;
     }
 
     // The earthen shield ("orb") NPC, or null when it is not active.
@@ -1486,12 +1756,17 @@ public class MokhaiotlHandler implements BossHandler {
         bossSeenEver = false;
         lastBossSeenTick = -1;
         meleePunishActive = false;
+        statueSoundActive = false;
         // Never leave the looping alert sounding once the fight state is torn down.
         SoundPlayer.stopLoop(MELEE_PUNISH_SOUND);
         prayerEvents.clear();
         scheduledProjectiles.clear();
         boulderTiles.clear();
         resetCarPhaseState();
+        clearSlam();
+        boulderObjects.clear();
+        eyeSpawnTiles.clear();
+        eyeSpawnLockedDelve = -1;
 
         highlightedStatueIndices.clear();
         attackedStatueIndices.clear();
@@ -1499,7 +1774,8 @@ public class MokhaiotlHandler implements BossHandler {
         destroyedStatueTiles.clear();
         farStatueIndex = -1;
         nearStatueIndex = -1;
-        shockwaveImpactTick = -1;
+        statueShockwaveExpiryTick = -1;
+        lastStatueDirectionTiles = Collections.emptySet();
         statuesPresentLastTick = false;
         loggedNoStatuePairThisPhase = false;
         loggedProjectileIds.clear();

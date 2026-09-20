@@ -436,6 +436,11 @@ public interface PvmKitsConfig extends Config {
         return true;
     }
 
+    @ConfigItem(keyName = "mokhaiotlUnpairedStatueMenuDemote", name = "Demote Unpaired Statues", description = "Take the volatile earth statues outside the highlighted pair off left-click, so a misclick during the shockwave phase walks instead of attacking the wrong statue. They stay available on right-click, and nothing is demoted while no pair is highlighted", section = mokhaiotl, position = 7)
+    default boolean mokhaiotlUnpairedStatueMenuDemote() {
+        return true;
+    }
+
     @ConfigItem(keyName = "showMokhaiotlBoulderTiles", name = "Show Boulder Shatter Tiles", description = "Highlight the tiles a rock throw's boulder will shatter onto so you can move out of them", section = mokhaiotl, position = 9)
     default boolean showMokhaiotlBoulderTiles() {
         return true;
@@ -451,29 +456,30 @@ public interface PvmKitsConfig extends Config {
         return true;
     }
 
-    @ConfigItem(keyName = "showMokhaiotlSlamArea", name = "Show Slam Danger Area", description = "Highlight the area the burrowed boss's slam will hit after a car phase dash: a Euclidean disc of radius ~15.8 tiles around where the boss lands, clipped to the arena floor and drawn as one region in transparent white, so anything outside the outline is out of range. Shown from the moment the dash is telegraphed, centred on the eye tile the boss dashes to and then on the boss itself once it lands, so the dash path highlight draws over the top of it", section = mokhaiotl, position = 15)
-    default boolean showMokhaiotlSlamArea() {
+    @ConfigItem(keyName = "showMokhaiotlCarSafeTiles", name = "Show Car Phase Safe Tiles", description = "Highlight in pastel green the tiles near you that a landed boulder puts between you and the boss, so its car phase dash cannot reach you there. Shown while no dash is telegraphed, so these and the dash path are never on screen together", section = mokhaiotl, position = 15)
+    default boolean showMokhaiotlCarSafeTiles() {
         return true;
     }
 
-    @ConfigItem(keyName = "showMokhaiotlSlamTimer", name = "Show Slam Timer", description = "Display a countdown in the middle of the slam danger area for its last 5 ticks, reaching 0 on the tick of the hit. Only the last 5 are shown because that is the window the impact tick is known exactly. Follow-up shockwaves in the same area get no timer of their own", section = mokhaiotl, position = 16)
-    default boolean showMokhaiotlSlamTimer() {
+    @ConfigItem(keyName = "showMokhaiotlEyeSpawnTiles", name = "Show First Dash Eye Tiles", description = "Mark the four tiles 9 north, east, south and west of where the boss spawns, which is where the delve's first car phase dash is most likely to put its eye. Marked once when the boss spawns, kept for the whole delve and re-marked on the next one, in a rotating rainbow colour. Note the dash goes diagonally about as often as it goes cardinally, so these are four of its eight possible directions", section = mokhaiotl, position = 16)
+    default boolean showMokhaiotlEyeSpawnTiles() {
         return true;
     }
+
 
     @ConfigItem(keyName = "showMokhaiotlMeleePunishTile", name = "Show Melee Punish Tile", description = "Highlight the boss's 5x5 true tile in red while it charges its beam and must be melee-punished", section = mokhaiotl, position = 17)
     default boolean showMokhaiotlMeleePunishTile() {
         return true;
     }
 
-    @ConfigItem(keyName = "mokhaiotlMeleePunishSound", name = "Melee Punish Sound", description = "Play an audio alert (bundled two-tone chime, played outside the game's own audio) from the moment the boss starts its beam charge-up and must be melee-punished. The alert repeats for as long as the charge is up (while the red boss tile is shown) and stops as soon as you interrupt it", section = mokhaiotl, position = 18)
-    default boolean mokhaiotlMeleePunishSound() {
+    @ConfigItem(keyName = "mokhaiotlWarningSounds", name = "Enable Statue Timing Sound", description = "Play an audio alert (bundled two-tone chime) when statues/boulders spawn. The alert repeats until the mechanic is handled.", section = mokhaiotl, position = 18)
+    default boolean mokhaiotlWarningSounds() {
         return false;
     }
 
     @Range(min = 0, max = 100)
-    @ConfigItem(keyName = "mokhaiotlMeleePunishSoundVolume", name = "Melee Punish Sound Volume", description = "Volume of the melee-punish audio alert (0-100)", section = mokhaiotl, position = 19)
-    default int mokhaiotlMeleePunishSoundVolume() {
+    @ConfigItem(keyName = "mokhaiotlWarningSoundsVolume", name = "Statue Timing Sound Volume", description = "Volume of the warning audio alerts (0-100)", section = mokhaiotl, position = 19)
+    default int mokhaiotlWarningSoundsVolume() {
         return 70;
     }
 
@@ -482,22 +488,16 @@ public interface PvmKitsConfig extends Config {
         return true;
     }
 
-    @ConfigItem(keyName = "showMokhaiotlShockwaveTimer", name = "Show Shockwave Timer", description = "Display a countdown over the highlighted statues showing ticks until the boss's shockwave attack", section = mokhaiotl, position = 23)
-    default boolean showMokhaiotlShockwaveTimer() {
-        return true;
-    }
+
+
 
     @ConfigItem(keyName = "mokhaiotlTimerTextSize", name = "Timer Text Size", description = "Size of the shockwave countdown timer text", section = mokhaiotl, position = 25)
     default int mokhaiotlTimerTextSize() {
         return 36;
     }
 
-    @ConfigItem(keyName = "hideMokhaiotlOrbModel", name = "Hide Orb Model", description = "Hide the 3x3 earthen shield orb model so it does not obscure the arena, while keeping its true tile highlighted", section = mokhaiotl, position = 26)
-    default boolean hideMokhaiotlOrbModel() {
-        return true;
-    }
 
-    @ConfigItem(keyName = "showMokhaiotlOrbTile", name = "Show Orb True Tile", description = "Highlight the earthen shield orb's 3x3 true tile so you can stand under it as it moves between statues", section = mokhaiotl, position = 27)
+    @ConfigItem(keyName = "showMokhaiotlOrbTile", name = "Hide Orb Model and Show True Tile", description = "Highlight the earthen shield orb's 3x3 true tile and hide the orb model so it doesn't obscure the arena, letting you stand under it as it moves between statues", section = mokhaiotl, position = 26)
     default boolean showMokhaiotlOrbTile() {
         return true;
     }
