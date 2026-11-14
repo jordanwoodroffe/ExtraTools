@@ -39,6 +39,9 @@ public class MokhaiotlPrayerOverlay extends Overlay {
     private static final int FIRST_PRAYER_CHILD = 9;
     private static final int LAST_PRAYER_CHILD = 38;
     private static final Color PRAYER_HIGHLIGHT_COLOR = new Color(150, 220, 165);
+    // Opacity of the highlight fill, kept well under opaque so the prayer icon
+    // still shows through it.
+    private static final int PRAYER_FILL_ALPHA = 120;
 
     private final Client client;
     private final PvmKitsPlugin plugin;
@@ -92,8 +95,7 @@ public class MokhaiotlPrayerOverlay extends Overlay {
                 continue;
             }
             // Transparent fill over the icon area so the icon still shows through.
-            int alpha = config.mokhaiotlPrayerGreenTransparency();
-            graphics.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha));
+            graphics.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), PRAYER_FILL_ALPHA));
             graphics.fillRect(b.x, b.y, b.width, b.height);
         }
         return null;

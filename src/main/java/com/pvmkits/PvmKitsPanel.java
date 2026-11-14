@@ -20,11 +20,13 @@ public class PvmKitsPanel extends PluginPanel {
         new String[]{"Theatre of Blood", "Verzik attack style overlay, P2/P3/Xarpus timers, Sotetseg death ball tick eat"},
         new String[]{"Maggot King", "Attack style overlay, larvae highlight, screech prayer warning"},
         new String[]{"Chambers of Xeric", "Olm attack style, Tekton flinch timer, crystal bomb, shaman spit, Vasa boulder"},
-        new String[]{"Doom of Mokhaiotl", "Prayer highlight, larvae, boulder tiles, shield/punish tiles, car phase safe tiles, first dash eye tiles, slam and shockwave timers"}
+        new String[]{"Doom of Mokhaiotl", "Prayer highlight, larvae, boulder tiles, shield/punish tiles, car phase safe tiles, first dash eye tiles, slam and shockwave timers"},
+        new String[]{"Fractured Archive", "Archive Guardian step-under timer, shield break warning, simplify arena, true tiles, mushroom and vine zones; Ezekiel slam, sword attack and enrage safe tiles; Moia safe tiles away from the Undead binders; Dreadnoth prayer timing, true tiles, ranged attacks, jellies and floor splats; plus raid mechanics discovery logging"}
     );
 
     private static final List<String[]> UTILITY_SECTIONS = Arrays.<String[]>asList(
-        new String[]{"Prayer Flicking", "Tick-synced heartbeat cue above the prayer orb for prayer flicking, plus a locator orb Redemption click counter"}
+        new String[]{"Prayer Flicking", "Tick-synced heartbeat cue above the prayer orb for prayer flicking, plus a locator orb Redemption click counter and a tea flask servings counter"},
+        new String[]{"Prayer & Health Bars", "Clean, rounded green health and blue prayer bars over your character, joined into one split bar or kept separate, with hitpoints and prayer numbers beside them; hides the game's own health bar"}
     );
 
     private final JPanel contentPanel;

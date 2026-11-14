@@ -258,8 +258,8 @@ public class NightmareOverlay extends Overlay {
                     int textX = centerX - (textWidth / 2);
                     int textY = stableY + (textHeight / 4);
 
-                    // Draw main text - use config color
-                    graphics.setColor(config.phosaniAttackTimerColor());
+                    // Draw main text in bright red
+                    graphics.setColor(Color.RED);
                     graphics.drawString(timerText, textX, textY);
                 }
             }

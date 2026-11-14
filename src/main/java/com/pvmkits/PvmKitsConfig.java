@@ -21,11 +21,17 @@ public interface PvmKitsConfig extends Config {
     @ConfigSection(name = "Chambers of Xeric", description = "Great Olm attack-style overlay and Tekton flinch timer", position = 5, closedByDefault = false)
     String cox = "cox";
 
-    @ConfigSection(name = "Doom of Mokhaiotl", description = "Doom of Mokhaiotl (delve boss) mechanics: prayer-book outline for incoming attacks, larvae highlighting and attack priority, boulder shatter tiles, shield / melee-punish boss tiles and the car (dash) phase path and safe tiles. Enable verbose logging to capture unknown projectile/object IDs from the fight to client.log.", position = 6, closedByDefault = false)
+    @ConfigSection(name = "Doom of Mokhaiotl", description = "Doom of Mokhaiotl (delve boss) mechanics: prayer-book outline for incoming attacks, larvae highlighting and attack priority, boulder shatter tiles, shield / melee-punish boss tiles and the car (dash) phase path and safe tiles.", position = 6, closedByDefault = false)
     String mokhaiotl = "mokhaiotl";
 
-    @ConfigSection(name = "Prayer Flicking", description = "Tick-synced heartbeat cue above the prayer orb for prayer flicking, plus a locator orb Redemption click counter", position = 7, closedByDefault = false)
+    @ConfigSection(name = "Fractured Archive", description = "The Fractured Archive (raid 4) mechanics discovery logging: NPC animations, spotanims, projectiles, ground graphics, object spawns, chat cues and varbits, written to the RuneLite client log", position = 7, closedByDefault = false)
+    String fracturedArchive = "fracturedArchive";
+
+    @ConfigSection(name = "Prayer Flicking", description = "Tick-synced heartbeat cue above the prayer orb for prayer flicking, plus a locator orb Redemption click counter and a tea flask servings counter", position = 8, closedByDefault = false)
     String prayerFlick = "prayerFlick";
+
+    @ConfigSection(name = "Prayer & Health Bars", description = "Restyled health and prayer bars over your character: rounded green (health) and blue (prayer) bars with a dark border, joined into one split bar or kept separate, with the numbers shown beside them, plus quiet hit numbers beside your character in place of its hitsplats", position = 9, closedByDefault = false)
+    String prayerBar = "prayerBar";
 
     // Yama Settings
     @ConfigItem(keyName = "highlightYama", name = "Highlight Yama", description = "Highlight Yama NPCs based on their combat phase", section = yama, position = 0)
@@ -122,11 +128,6 @@ public interface PvmKitsConfig extends Config {
     @ConfigItem(keyName = "phosaniTimerTextSize", name = "Timer Text Size", description = "Size of the attack timer text", section = phosani, position = 2)
     default int phosaniTimerTextSize() {
         return 36;
-    }
-
-    @ConfigItem(keyName = "phosaniAttackTimerColor", name = "Attack Timer Color", description = "Color for the attack countdown timer", section = phosani, position = 3)
-    default Color phosaniAttackTimerColor() {
-        return new Color(255, 0, 0); // Bright red
     }
 
     @ConfigItem(keyName = "phosaniTransparency", name = "Highlight Transparency", description = "Transparency level for tiles, sleepwalkers, husks, and spore highlighting (0-255)", section = phosani, position = 5)
@@ -365,6 +366,184 @@ public interface PvmKitsConfig extends Config {
         return 50;
     }
 
+    // Fractured Archive Settings
+    @ConfigItem(keyName = "showArchiveGuardianTrueTiles", name = "Guardian True Tiles", description = "Outline the Archive Guardian's 5x5 true tiles in a faint dormant white (the same as the Doom of Mokhaiotl's waiting statue) for the whole fight - while it flies, its model floats above these tiles, and while it is downed they are the area to hit with melee", section = fracturedArchive, position = 1)
+    default boolean showArchiveGuardianTrueTiles() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showArchiveGuardianStepTimer", name = "Guardian Step-Under Timer", description = "Count down the Archive Guardian's 5-tick attack rhythm at its feet (5-4-3-2-1), styled like the Phosani attack timer (white, with 1 in Phosani's pastel range green). Step under the boss on 1, the tick before it attacks, which makes it slam the ground instead of shooting (step back out to avoid the slam). The wiki notes this does not work every time. Hidden while it is downed", section = fracturedArchive, position = 2)
+    default boolean showArchiveGuardianStepTimer() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "archiveTimerTextSize", name = "Boss Timer Text Size", description = "Size of the timer text at the boss's feet: the Guardian step-under timer and the Moia cough timer", section = fracturedArchive, position = 3)
+    default int archiveTimerTextSize() {
+        return 36;
+    }
+
+    @ConfigItem(keyName = "showArchiveShieldBreakHull", name = "Shield Break Warning", description = "Fill the Archive Guardian's model hull red (Phosani's melee colour) during the last 12% of its shield, as a reminder to move away from it before the shield breaks and it crashes down. Gone once it is downed", section = fracturedArchive, position = 4)
+    default boolean showArchiveShieldBreakHull() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showArchiveGuardianBeamTimer", name = "Guardian Beam Timer", description = "Tick-eat countdown for the Archive Guardian's low-health beam over sharks, Saradomin brews, Tea flasks and Purple sweets in your inventory, styled like Sotetseg's death-ball timer: 10 when it starts charging, down to a green 0 on the tick it hits (the tick to eat). The step-under timer hides while a beam is charging", section = fracturedArchive, position = 5)
+    default boolean showArchiveGuardianBeamTimer() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightArchiveMushrooms", name = "Highlight Mushrooms", description = "Mark the 3x3 area of each Archive Guardian mushroom in muted red (the same style as Phosani's spore zones), from the moment it sprouts until it is set off", section = fracturedArchive, position = 6)
+    default boolean highlightArchiveMushrooms() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightArchiveVines", name = "Highlight Vines", description = "Mark the 3x3 area around each vine in the Archive Guardian's downed phase in the same muted red as the mushrooms, so it can be dodged", section = fracturedArchive, position = 7)
+    default boolean highlightArchiveVines() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightEzekielSlam", name = "Ezekiel Slam Safe Tiles", description = "While Ezekiel's ground slam telegraph is on the floor, mark in soft green (Phosani's range green) every walkable tile that touches the slam's edge, side-on or diagonally - the closest places to stand to dodge it. The tiles under Ezekiel himself are never marked, and the marks clear once the slam's second hit lands", section = fracturedArchive, position = 11)
+    default boolean highlightEzekielSlam() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightEzekielConvergingSwords", name = "Ezekiel Converging Swords", description = "When Ezekiel's swords fly in from the arena's edges to meet in one 3x3, draw a one-tile pastel blue line down the middle of the lane nearest the arena's middle (between the north and south swords or between the west and east ones), and mark in soft green the corners of that 3x3 that no sword passes through", section = fracturedArchive, position = 12)
+    default boolean highlightEzekielConvergingSwords() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightEzekielSwordSwipe", name = "Ezekiel Sword Swipe Tiles", description = "When three of Ezekiel's swords line up along an edge and charge, mark two soft green tiles in front of them once the firing order is known (from their draining bars, or from the first sword to fire): one next to the second-last sword and one next to the last. Stand on the one next to the last sword while the first two fire, then step onto the other to dodge the last. Hidden once the last sword fires", section = fracturedArchive, position = 13)
+    default boolean highlightEzekielSwordSwipe() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightEzekielFourSwords", name = "Ezekiel Four Swords Safe Zone", description = "When Ezekiel's swords spawn two on each side of the arena, fill the lanes none of them sweeps (the middle two east-west rows) in soft green, with a single outline around the whole zone, plus a pastel blue line a one-tile gap either side of it and a soft green line a one-tile gap outside each blue one. Until the slam that comes with them has landed, its tiles and the tiles under Ezekiel are left out of the zone", section = fracturedArchive, position = 14)
+    default boolean highlightEzekielFourSwords() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightEzekielEnrage", name = "Ezekiel Enrage Safe Tiles", description = "In Ezekiel's enrage, when the walls box you into a 3x3, mark in soft green the tiles each lightning strike misses (the side of the sword left dark, or the back row), shown only on the tick to click onto them - the tick before that strike's lightning shows. The three strikes come a tick apart, so each set of tiles appears as the strike before it lands", section = fracturedArchive, position = 15)
+    default boolean highlightEzekielEnrage() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightMoiaSafeTiles", name = "Moia Safe Tiles", description = "In Moia's 9x9 arena, mark the north-west corner tile in soft green (the same as Ezekiel's safe tiles) until her enrage. From her \"Cease this futile resistance!\" nothing is marked until her \"Useless corpses... Give me your strength!\"; from then on, mark instead every arena tile at least 3 tiles from every Undead binder (they hit anyone within two tiles, diagonals included), updated as the binders circle her. Binders she raises on \"Again!\" count from the tick they spawn. When the binders start walking to their next places the tiles fade out over their walk, and the tiles for where they stop show in full as they stand still. Her own 3x3 is never marked", section = fracturedArchive, position = 16)
+    default boolean highlightMoiaSafeTiles() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightMoiaAttackStyle", name = "Moia Attack Style", description = "Highlight Moia's 3x3 base like Phosani's attack-style square, in soft green. From when she throws an axe (her mage attack) until it lands, her centre tile also shows purple, like Phosani's cursed centre tile. The axe shares her normal attack animation, so the purple tile appears as the axe leaves her hand, a tick after she swings, about 6 ticks before it lands", section = fracturedArchive, position = 17)
+    default boolean highlightMoiaAttackStyle() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "moiaAxeSound", name = "Moia Axe Sound", description = "Loop the Doom of Mokhaiotl's melee-punish chime (played outside the game's own audio) from when Moia throws an axe until it lands, the same window her centre tile shows purple. It runs straight through back-to-back axes and stops the moment the last one lands. Works whether or not Moia Attack Style is on", section = fracturedArchive, position = 17)
+    default boolean moiaAxeSound() {
+        return true;
+    }
+
+    @Range(min = 0, max = 100)
+    @ConfigItem(keyName = "moiaAxeSoundVolume", name = "Moia Axe Sound Volume", description = "Volume of the Moia axe audio alert (0-100)", section = fracturedArchive, position = 17)
+    default int moiaAxeSoundVolume() {
+        return 70;
+    }
+
+    @ConfigItem(keyName = "highlightMoiaVenatorBinders", name = "Moia Venator Binders", description = "Highlight in soft red the tile and hull of the Undead binder standing on the centre tile of Moia's 9x9 arena, the one to shoot with the Venator bow. Shown once that binder has stood on the centre for a tick; other binders spawning or moving do not hide it. Uses the binders' server tiles; the tile is drawn under the model so it moves smoothly. Moia herself is never highlighted, even when she stands in the middle of the arena in her enrage", section = fracturedArchive, position = 18)
+    default boolean highlightMoiaVenatorBinders() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showMoiaPrayerTiming", name = "Moia Prayer Timing", description = "Like the Doom of Mokhaiotl's prayer highlight, fill the protection prayer to be on in the open prayer book in soft green, until you pray it. Protect from Missiles through Moia's fight, and Protect from Magic for the one tick her axe's damage lands, a tick before it visibly reaches you (5 ticks after it is thrown, or 6 in her enrage, where it flies a tick longer), then straight back to Missiles", section = fracturedArchive, position = 19)
+    default boolean showMoiaPrayerTiming() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showMoiaAxeCountdown", name = "Moia Axe Countdown", description = "While Moia's axe (her mage attack) is in the air, count down over Protect from Magic in the open prayer book: 5-4-3-2 in white, then a green 1 on the tick to switch to Magic (the same tick the prayer highlight turns green). It starts the tick after the axe appears, or a tick later in her enrage, where the axe flies a tick longer. Styled like the Archive's boss timers", section = fracturedArchive, position = 19)
+    default boolean showMoiaAxeCountdown() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "moiaAxeCountdownTextSize", name = "Moia Axe Countdown Text Size", description = "Size of the axe countdown text drawn over the Protect from Magic icon", section = fracturedArchive, position = 19)
+    default int moiaAxeCountdownTextSize() {
+        return 22;
+    }
+
+    @ConfigItem(keyName = "showMoiaCoughTimer", name = "Moia Cough Timer", description = "When Moia coughs (the smoke that poisons you and spreads to the binders), count down its flight in soft pastel red at her feet: 4-3-2-1, the 4 as she coughs and the 1 on the last tick before the smoke lands and poisons you. Timed off the smoke itself, so it is never wrong; the cough cannot be called earlier, as the attacks before it vary at random. Same font and text size as the Guardian step-under timer", section = fracturedArchive, position = 20)
+    default boolean showMoiaCoughTimer() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "hideMoiaCough", name = "Hide Binder Cough", description = "Hide the \"*Cough*\" overhead text. Moia's cough attack spreads from you to the Undead binders, and an infected binder says it every 8 ticks, often from your own tile, so it shows over your head. Hidden on any character, including you", section = fracturedArchive, position = 20)
+    default boolean hideMoiaCough() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showDreadnothTrueTiles", name = "Dreadnoth True Tiles", description = "Outline Dreadnoth the Jellied's 5x5 true tiles in the same faint grey as the Archive Guardian's. They are his server tiles, so while he walks (a tile every two ticks) they step ahead of his model to where he really is", section = fracturedArchive, position = 21)
+    default boolean showDreadnothTrueTiles() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightDreadnothAttackStyle", name = "Dreadnoth Attack Style", description = "Highlight Dreadnoth's 5x5 base in soft green (Phosani's range colour) from the moment he launches a projectile at a player until it lands. Nothing is drawn for his melee, his main attack, so between ranged attacks only his grey true tiles show", section = fracturedArchive, position = 22)
+    default boolean highlightDreadnothAttackStyle() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showDreadnothPrayerTiming", name = "Dreadnoth Prayer Timing", description = "Like the Doom of Mokhaiotl's and Moia's prayer highlights, fill the protection prayer to be on in the open prayer book in soft green, until you pray it. Protect from Melee through Dreadnoth's fight (his slams, his melee and the jellies, including any left after he dies), and Protect from Missiles only on the ticks his ranged projectiles hit you: three ticks in a row after each slam, then straight back to Melee, as his next slam hits the very next tick", section = fracturedArchive, position = 22)
+    default boolean showDreadnothPrayerTiming() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showDreadnothRangedCountdown", name = "Dreadnoth Ranged Countdown", description = "Like Moia's axe countdown: when Dreadnoth slams, count down over Protect from Missiles in the open prayer book to his ranged hits, 4-3-2 in white, then a green 1 on the tick to switch to Missiles (the same tick the prayer highlight turns green). It starts the tick after each slam, so between two volleys of one phase it runs through the three Melee ticks in between", section = fracturedArchive, position = 22)
+    default boolean showDreadnothRangedCountdown() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "dreadnothRangedCountdownTextSize", name = "Dreadnoth Ranged Countdown Text Size", description = "Size of the ranged countdown text drawn over the Protect from Missiles icon", section = fracturedArchive, position = 22)
+    default int dreadnothRangedCountdownTextSize() {
+        return 22;
+    }
+
+    @ConfigItem(keyName = "highlightDreadnothJellies", name = "Dreadnoth Jellies", description = "Highlight each Jelly's true tile and model hull in the same soft pastel red as Dreadnoth's floor splats", section = fracturedArchive, position = 23)
+    default boolean highlightDreadnothJellies() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "highlightDreadnothFloor", name = "Dreadnoth Floor Splats", description = "Mark in a soft pastel red, lighter than the Guardian's mushrooms, every tile in Dreadnoth's room with something on the floor (the jelly splats that hit for 6-8 a tick), so you can stick to clear tiles. Their ids are not known yet, so this marks anything that appears on a walkable floor tile after the room loads: spawned objects, floor decorations and ground graphics, except the raid's invisible blockers and any graphic that covers the whole arena", section = fracturedArchive, position = 24)
+    default boolean highlightDreadnothFloor() {
+        return true;
+    }
+
+    @Range(min = 0, max = 255)
+    @ConfigItem(keyName = "archiveTransparency", name = "Highlight Transparency", description = "Fill opacity of the mushroom and vine zones, Moia's and Dreadnoth's attack-style squares and Dreadnoth's floor splats (0-255). Ezekiel's safe tiles and sword areas are a fixed 37% opaque", section = fracturedArchive, position = 8)
+    default int archiveTransparency() {
+        return 50;
+    }
+
+    @ConfigItem(keyName = "simplifyArchiveArena", name = "Simplify Arena", description = "Repaint the Archive Guardian's whole walled room a single flat colour (set by Simplified Arena Color below), with its texture stripped, so the fight's tile highlights stand out against a uniform background. The room is measured from the floor around the Guardian, walls included, and the original floor is restored as soon as you leave or turn this off", section = fracturedArchive, position = 9)
+    default boolean simplifyArchiveArena() {
+        return false;
+    }
+
+    @ConfigItem(keyName = "archiveArenaColor", name = "Simplified Arena Color", description = "The colour the Archive Guardian's room floor is repainted when Simplify Arena is on. Only the hue, saturation and brightness are used - the client's own lighting still shades it, and transparency has no effect", section = fracturedArchive, position = 10)
+    default Color archiveArenaColor() {
+        return new Color(166, 138, 108);
+    }
+
+    @ConfigItem(keyName = "fracturedArchiveLogging", name = "Mechanics Logging", description = "While in The Fractured Archive, write every boss animation, spotanim, projectile, ground graphic, object spawn, NPC spawn/transform, overhead shout, game message and hit you take to the RuneLite client log (lines start with [Archive t<tick> r<room tick>]). Repeats are kept so attack timings can be read off, but per-frame and per-tile spam is grouped. A summary of every id seen is written when you leave", section = fracturedArchive, position = 26)
+    default boolean fracturedArchiveLogging() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "fracturedArchiveLogVars", name = "Log Varbit Changes", description = "Also log varbit and varp changes while in the Archive (raid state such as the current room, phase or door choice usually lives in these). A var that keeps changing is muted after 25 changes", section = fracturedArchive, position = 27)
+    default boolean fracturedArchiveLogVars() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "fracturedArchiveAnyInstance", name = "Treat Any Instance As Archive", description = "Fallback for if the logger does not start on its own: the Archive is recognised by its boss names, which have not been confirmed in game yet. With this on, any instance the other bosses in this plugin do not claim is logged as the Archive. Turn it off again once the room ids are known", section = fracturedArchive, position = 28)
+    default boolean fracturedArchiveAnyInstance() {
+        return false;
+    }
+
     // Prayer Flicking Settings
     @ConfigItem(keyName = "showPrayerFlickHeartbeat", name = "Show Flick Heartbeat", description = "Flash a red heartbeat dot above the prayer orb once per game tick, peaking just before the middle of each tick, to keep the rhythm for prayer flicking (unlimited prayer)", section = prayerFlick, position = 0)
     default boolean showPrayerFlickHeartbeat() {
@@ -414,16 +593,150 @@ public interface PvmKitsConfig extends Config {
         return new Color(0, 255, 0); // Green
     }
 
-    // Doom of Mokhaiotl Settings
-    @ConfigItem(keyName = "showMokhaiotlPrayerOutline", name = "Show Prayer Highlight", description = "Fill the required protection prayer icon in the prayer book with a transparent colour, shown on the next incoming attack to pray until you pray it. Covers standard orbs, car-phase attacks and the boulder shatter sequence", section = mokhaiotl, position = 1)
-    default boolean showMokhaiotlPrayerOutline() {
+    // Tea Flask Settings (within Prayer Flicking)
+    @ConfigItem(keyName = "showTeaFlaskCounter", name = "Show Tea Flask Counter", description = "Show the servings of tea left in the tea flask (0-5) over the flask in the inventory. Shows ? until known - look in the flask once to sync it; after that drinking and filling keep it up to date", section = prayerFlick, position = 9)
+    default boolean showTeaFlaskCounter() {
         return true;
     }
 
-    @ConfigItem(keyName = "mokhaiotlPrayerGreenTransparency", name = "Prayer Highlight Transparency", description = "Opacity of the prayer-book highlight fill (0-255), so the prayer icon still shows through", section = mokhaiotl, position = 3)
-    @Range(min = 0, max = 255)
-    default int mokhaiotlPrayerGreenTransparency() {
-        return 120;
+    @ConfigItem(keyName = "teaFlaskCounterColor", name = "Tea Flask Color", description = "Colour of the tea flask counter while it has tea in it", section = prayerFlick, position = 10)
+    default Color teaFlaskCounterColor() {
+        return new Color(255, 255, 0); // Yellow
+    }
+
+    @ConfigItem(keyName = "teaFlaskEmptyColor", name = "Tea Flask Empty Color", description = "Colour of the tea flask counter when the flask is empty (0)", section = prayerFlick, position = 11)
+    default Color teaFlaskEmptyColor() {
+        return new Color(255, 0, 0); // Red
+    }
+
+    // Prayer Bar Settings
+    @ConfigItem(keyName = "showPrayerBar", name = "Show Prayer Bar", description = "Draw a rounded prayer bar directly under your health bar showing your current prayer points. Turn off the core Prayer plugin's own prayer bar to avoid drawing two", section = prayerBar, position = 0)
+    default boolean showPrayerBar() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "prayerBarOnlyWhenPraying", name = "Only While Praying", description = "Only show the prayer bar while at least one prayer is active", section = prayerBar, position = 1)
+    default boolean prayerBarOnlyWhenPraying() {
+        return false;
+    }
+
+    @ConfigItem(keyName = "prayerBarOnlyWithHealthBar", name = "Only With Health Bar", description = "Only show the prayer bar while your own health bar is showing (i.e. in combat)", section = prayerBar, position = 2)
+    default boolean prayerBarOnlyWithHealthBar() {
+        return false;
+    }
+
+    @Alpha
+    @ConfigItem(keyName = "prayerBarFillColor", name = "Fill Color", description = "Colour of the filled part of the prayer bar (a light-to-dark shade of it is applied automatically)", section = prayerBar, position = 3)
+    default Color prayerBarFillColor() {
+        return new Color(40, 140, 245); // Prayer blue
+    }
+
+    @Alpha
+    @ConfigItem(keyName = "prayerBarBackgroundColor", name = "Background Color", description = "Colour of the empty part of the prayer and health bars", section = prayerBar, position = 4)
+    default Color prayerBarBackgroundColor() {
+        return new Color(18, 24, 36, 230); // Deep navy
+    }
+
+    @Alpha
+    @ConfigItem(keyName = "prayerBarBorderColor", name = "Border Color", description = "Colour of the rounded border of the prayer and health bars", section = prayerBar, position = 5)
+    default Color prayerBarBorderColor() {
+        return Color.BLACK;
+    }
+
+    @ConfigItem(keyName = "prayerBarWidth", name = "Width", description = "Width of the prayer and health bars in pixels (the game's own health bar is 30)", section = prayerBar, position = 6)
+    @Range(min = 10, max = 120)
+    default int prayerBarWidth() {
+        return 30;
+    }
+
+    @ConfigItem(keyName = "prayerBarHeight", name = "Height", description = "Height of each of the prayer and health bars in pixels", section = prayerBar, position = 7)
+    @Range(min = 3, max = 16)
+    default int prayerBarHeight() {
+        return 6;
+    }
+
+    @ConfigItem(keyName = "prayerBarVerticalOffset", name = "Vertical Offset", description = "Move the prayer bar (and the health bar above it) down by this many pixels (negative = up)", section = prayerBar, position = 8)
+    @Range(min = -100, max = 100)
+    default int prayerBarVerticalOffset() {
+        return 0;
+    }
+
+    @ConfigItem(keyName = "showStyledHealthBar", name = "Show Health Bar", description = "Draw a matching rounded health bar just above the prayer bar showing your current hitpoints", section = prayerBar, position = 9)
+    default boolean showStyledHealthBar() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "hideGameHealthBar", name = "Hide Game Health Bar", description = "Hide the game's own health bar over your character (only yours - NPC health bars, hitsplats and prayer icons are untouched) so it never shows over these bars. Only applies while Show Health Bar is on", section = prayerBar, position = 10)
+    default boolean hideGameHealthBar() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "hideOwnHitsplats", name = "Hide My Hitsplats", description = "Hide every hitsplat that lands on your character - damage, 0s, poison, venom, acid, heals, any type - so your hitpoints are read from the health bar instead. Hitsplats on NPCs and other players, your prayer icon and overhead text are untouched. Works on hitsplats that land after it is switched on", section = prayerBar, position = 10)
+    default boolean hideOwnHitsplats() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "healthBarOnlyInCombat", name = "Health Only In Combat", description = "Only show the health bar while you are in combat (while the game would show its own health bar)", section = prayerBar, position = 11)
+    default boolean healthBarOnlyInCombat() {
+        return false;
+    }
+
+    @Alpha
+    @ConfigItem(keyName = "healthBarFillColor", name = "Health Fill Color", description = "Colour of the filled part of the health bar (a light-to-dark shade of it is applied automatically)", section = prayerBar, position = 12)
+    default Color healthBarFillColor() {
+        return new Color(50, 200, 90); // Health green
+    }
+
+    @Alpha
+    @ConfigItem(keyName = "healthBarPoisonedColor", name = "Health Poisoned Color", description = "Colour the health bar (and hitpoints number) switches to while you are poisoned or venomed, going back to the normal fill colour once cured", section = prayerBar, position = 13)
+    default Color healthBarPoisonedColor() {
+        return new Color(30, 130, 55); // Darker green
+    }
+
+    @ConfigItem(keyName = "healthBarGap", name = "Health Bar Gap", description = "Gap in pixels between the health bar and the prayer bar below it (separate bars only - joined bars share one divider line)", section = prayerBar, position = 14)
+    @Range(min = 0, max = 30)
+    default int healthBarGap() {
+        return 1;
+    }
+
+    @ConfigItem(keyName = "joinStatusBars", name = "Join Bars", description = "Draw health and prayer as one rounded bar split by a straight divider line (health on top, prayer below) instead of two separate bars. Falls back to a single bar while only one of the two is showing", section = prayerBar, position = 15)
+    default boolean joinStatusBars() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "showStatusBarNumbers", name = "Show Numbers", description = "Show your current hitpoints (in the health colour) stacked over your current prayer points (in the prayer colour) just to the left of the bars", section = prayerBar, position = 16)
+    default boolean showStatusBarNumbers() {
+        return true;
+    }
+
+    @ConfigItem(keyName = "statusBarTextSize", name = "Text Size", description = "Font size of the hitpoints and prayer numbers (the rising hit numbers are always size 14)", section = prayerBar, position = 17)
+    @Range(min = 6, max = 24)
+    default int statusBarTextSize() {
+        return 11;
+    }
+
+    @ConfigItem(keyName = "showOwnHitNumbers", name = "Show My Hit Numbers", description = "Each hitsplat that lands on you rises out of the hitpoints number beside the bars as -12 (or +12 for a heal, 0 for a block), drifting up and away from the bars at 45 degrees in a fixed size 14 font, then fades away - a quiet replacement for the splats Hide My Hitsplats removes. Needs a bar showing", section = prayerBar, position = 18)
+    default boolean showOwnHitNumbers() {
+        return true;
+    }
+
+    @Alpha
+    @ConfigItem(keyName = "ownHitNumbersColor", name = "Hit Number Color", description = "Colour of the rising hit numbers. Lower the alpha to make them more see-through", section = prayerBar, position = 19)
+    default Color ownHitNumbersColor() {
+        return new Color(80, 80, 80, 180); // Soft dark grey, semi-transparent
+    }
+
+    @Units(Units.MILLISECONDS)
+    @ConfigItem(keyName = "ownHitNumbersDuration", name = "Hit Number Time", description = "How long each hit number takes to rise and fade away", section = prayerBar, position = 20)
+    @Range(min = 300, max = 6000)
+    default int ownHitNumbersDuration() {
+        return 2000;
+    }
+
+    // Doom of Mokhaiotl Settings
+    @ConfigItem(keyName = "showMokhaiotlPrayerOutline", name = "Highlight Prayer Timing", description = "Fill the required protection prayer icon in the prayer book with a transparent colour, shown on the next incoming attack to pray until you pray it. Covers standard orbs, car-phase attacks and the boulder shatter sequence", section = mokhaiotl, position = 1)
+    default boolean showMokhaiotlPrayerOutline() {
+        return true;
     }
 
     @ConfigItem(keyName = "highlightMokhaiotlLarvae", name = "Highlight Larvae", description = "Highlight demonic larvae true tiles in the colour of the combat style needed to kill them (green range, blue magic, red melee)", section = mokhaiotl, position = 5)
@@ -436,18 +749,13 @@ public interface PvmKitsConfig extends Config {
         return true;
     }
 
-    @ConfigItem(keyName = "mokhaiotlUnpairedStatueMenuDemote", name = "Demote Unpaired Statues", description = "Take the volatile earth statues outside the highlighted pair off left-click, so a misclick during the shockwave phase walks instead of attacking the wrong statue. They stay available on right-click, and nothing is demoted while no pair is highlighted", section = mokhaiotl, position = 7)
-    default boolean mokhaiotlUnpairedStatueMenuDemote() {
-        return true;
-    }
-
     @ConfigItem(keyName = "showMokhaiotlBoulderTiles", name = "Show Boulder Shatter Tiles", description = "Highlight the tiles a rock throw's boulder will shatter onto so you can move out of them", section = mokhaiotl, position = 9)
     default boolean showMokhaiotlBoulderTiles() {
         return true;
     }
 
-    @ConfigItem(keyName = "showMokhaiotlShieldTile", name = "Show Shield Phase Tile", description = "Highlight the boss's 5x5 true tile in blue during its shield phase", section = mokhaiotl, position = 11)
-    default boolean showMokhaiotlShieldTile() {
+    @ConfigItem(keyName = "showMokhaiotlShieldTile", name = "Shield/Melee Punish Boss Highlight", description = "Highlight the boss's 5x5 true tile: blue during its shield phase, red while it charges its beam and must be melee-punished", section = mokhaiotl, position = 11)
+    default boolean showMokhaiotlBossPhaseTile() {
         return true;
     }
 
@@ -461,29 +769,24 @@ public interface PvmKitsConfig extends Config {
         return true;
     }
 
-    @ConfigItem(keyName = "showMokhaiotlEyeSpawnTiles", name = "Show First Dash Eye Tiles", description = "Mark the four tiles 9 north, east, south and west of where the boss spawns, which is where the delve's first car phase dash is most likely to put its eye. Marked once when the boss spawns, kept for the whole delve and re-marked on the next one, in a rotating rainbow colour. Note the dash goes diagonally about as often as it goes cardinally, so these are four of its eight possible directions", section = mokhaiotl, position = 16)
+    @ConfigItem(keyName = "showMokhaiotlEyeSpawnTiles", name = "Show First Dash Eye Tiles", description = "Mark the four tiles 10 north, east, south and west of where the boss spawns, which is where the delve's first car phase dash is most likely to put its eye. Marked once when the boss spawns, kept for the whole delve and re-marked on the next one, in a rotating rainbow colour. Note the dash goes diagonally about as often as it goes cardinally, so these are four of its eight possible directions", section = mokhaiotl, position = 16)
     default boolean showMokhaiotlEyeSpawnTiles() {
         return true;
     }
 
 
-    @ConfigItem(keyName = "showMokhaiotlMeleePunishTile", name = "Show Melee Punish Tile", description = "Highlight the boss's 5x5 true tile in red while it charges its beam and must be melee-punished", section = mokhaiotl, position = 17)
-    default boolean showMokhaiotlMeleePunishTile() {
-        return true;
-    }
-
-    @ConfigItem(keyName = "mokhaiotlWarningSounds", name = "Enable Statue Timing Sound", description = "Play an audio alert (bundled two-tone chime) when statues/boulders spawn. The alert repeats until the mechanic is handled.", section = mokhaiotl, position = 18)
-    default boolean mokhaiotlWarningSounds() {
+    @ConfigItem(keyName = "mokhaiotlMeleePunishSound", name = "Melee Punish Sound", description = "Play an audio alert (bundled two-tone chime, played outside the game's own audio) from the moment the boss starts its beam charge-up and must be melee-punished. The alert repeats for as long as the charge is up (while the red boss tile is shown) and stops as soon as you interrupt it", section = mokhaiotl, position = 18)
+    default boolean mokhaiotlMeleePunishSound() {
         return false;
     }
 
     @Range(min = 0, max = 100)
-    @ConfigItem(keyName = "mokhaiotlWarningSoundsVolume", name = "Statue Timing Sound Volume", description = "Volume of the warning audio alerts (0-100)", section = mokhaiotl, position = 19)
-    default int mokhaiotlWarningSoundsVolume() {
+    @ConfigItem(keyName = "mokhaiotlMeleePunishSoundVolume", name = "Melee Punish Sound Volume", description = "Volume of the melee-punish audio alert (0-100)", section = mokhaiotl, position = 19)
+    default int mokhaiotlMeleePunishSoundVolume() {
         return 70;
     }
 
-    @ConfigItem(keyName = "showMokhaiotlStatues", name = "Show Shockwave Statues", description = "Highlight the nearest usable pair of volatile earth statues (in line, 14+ tiles apart, relaxing to a shorter or one-tile-off-axis pair when no such pair exists): the far one green then red once attacked, the near one dormant grey until its turn", section = mokhaiotl, position = 20)
+    @ConfigItem(keyName = "showMokhaiotlStatues", name = "Suggest Statue Pairs", description = "Highlight the nearest usable pair of volatile earth statues (in line, 14+ tiles apart, relaxing to a shorter or one-tile-off-axis pair when no such pair exists): the far one green then red once attacked, the near one dormant grey until its turn. Also takes the statues outside that pair, and every demonic larva, off left-click for the duration of the shockwave phase, so a misclick walks instead of attacking the wrong target - they stay on right-click, normal larva clicking resumes once the phase ends, and nothing is demoted while no pair is highlighted", section = mokhaiotl, position = 20)
     default boolean showMokhaiotlStatues() {
         return true;
     }
@@ -491,24 +794,19 @@ public interface PvmKitsConfig extends Config {
 
 
 
-    @ConfigItem(keyName = "mokhaiotlTimerTextSize", name = "Timer Text Size", description = "Size of the shockwave countdown timer text", section = mokhaiotl, position = 25)
-    default int mokhaiotlTimerTextSize() {
-        return 36;
-    }
-
 
     @ConfigItem(keyName = "showMokhaiotlOrbTile", name = "Hide Orb Model and Show True Tile", description = "Highlight the earthen shield orb's 3x3 true tile and hide the orb model so it doesn't obscure the arena, letting you stand under it as it moves between statues", section = mokhaiotl, position = 26)
     default boolean showMokhaiotlOrbTile() {
         return true;
     }
 
-    @ConfigItem(keyName = "mokhaiotlTransparency", name = "Highlight Transparency", description = "Transparency level applied to all Doom of Mokhaiotl tile fills (0-255)", section = mokhaiotl, position = 29)
-    default int mokhaiotlTransparency() {
-        return 70;
+    @ConfigItem(keyName = "simplifyMokhaiotlArena", name = "Simplify Arena", description = "Repaint the walled arena room's floor a single flat colour (set by Simplified Arena Color below), with its texture stripped, so the fight's tile highlights (dash path, slam area, boulder shatter tiles) stand out against a uniform background instead of the arena's own patterned floor. Covers the whole room - its corners, wall ring and entrance alcove - and is applied from the moment you enter rather than waiting for the boss to spawn. The original floor is restored as soon as you leave or turn this off", section = mokhaiotl, position = 28)
+    default boolean simplifyMokhaiotlArena() {
+        return false;
     }
 
-    @ConfigItem(keyName = "mokhaiotlVerboseLogging", name = "Verbose Logging", description = "Log unknown projectile/object IDs from the Doom of Mokhaiotl fight to client.log for development purposes", section = mokhaiotl, position = 31)
-    default boolean mokhaiotlVerboseLogging() {
-        return false;
+    @ConfigItem(keyName = "mokhaiotlArenaColor", name = "Simplified Arena Color", description = "The colour the arena floor is repainted when Simplify Arena is on. Only the hue, saturation and brightness are used - the floor is still shaded by the client's own lighting, so it will not match this swatch exactly, and transparency has no effect. A desaturated mid tone keeps the fight's tile highlights legible on top of it", section = mokhaiotl, position = 29)
+    default Color mokhaiotlArenaColor() {
+        return new Color(166, 138, 108);
     }
 }

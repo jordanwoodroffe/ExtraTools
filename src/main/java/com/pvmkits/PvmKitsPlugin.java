@@ -20,28 +20,52 @@ import com.pvmkits.bosses.cox.TektonHandler;
 import com.pvmkits.bosses.cox.TektonOverlay;
 import com.pvmkits.bosses.cox.VasaHandler;
 import com.pvmkits.bosses.cox.VasaOverlay;
+import com.pvmkits.bosses.mokhaiotl.MokhaiotlArenaSimplifier;
 import com.pvmkits.bosses.mokhaiotl.MokhaiotlHandler;
 import com.pvmkits.bosses.mokhaiotl.MokhaiotlOverlay;
 import com.pvmkits.bosses.mokhaiotl.MokhaiotlPrayerOverlay;
+import com.pvmkits.bosses.archive.FracturedArchiveHandler;
+import com.pvmkits.bosses.archive.FracturedArchiveOverlay;
+import com.pvmkits.bosses.archive.ArchiveArenaSimplifier;
+import com.pvmkits.bosses.archive.ArchiveTickEatOverlay;
+import com.pvmkits.bosses.archive.ArchivePrayerOverlay;
 
 import com.pvmkits.core.BossHandler;
 import com.pvmkits.core.LocatorOrbOverlay;
+import com.pvmkits.core.StatusBarsOverlay;
+import com.pvmkits.core.OwnHealthBarHider;
+import com.pvmkits.core.OwnHitsplatHider;
 import com.pvmkits.core.PrayerFlickOverlay;
+import com.pvmkits.core.TeaFlaskOverlay;
+import com.pvmkits.core.TeaFlaskTracker;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.NPC;
 import net.runelite.api.Renderable;
 import net.runelite.api.events.AnimationChanged;
+import net.runelite.api.events.BeforeRender;
+import net.runelite.api.events.PostHealthBarConfig;
+import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.ClientTick;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GraphicChanged;
 import net.runelite.api.events.ProjectileMoved;
 import net.runelite.api.events.GameObjectSpawned;
 import net.runelite.api.events.GameObjectDespawned;
+import net.runelite.api.events.GroundObjectDespawned;
+import net.runelite.api.events.GroundObjectSpawned;
 import net.runelite.api.events.HitsplatApplied;
+import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.PostMenuSort;
+import net.runelite.api.events.NpcChanged;
 import net.runelite.api.events.NpcDespawned;
 import net.runelite.api.events.NpcSpawned;
+import net.runelite.api.events.OverheadTextChanged;
+import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.events.WidgetLoaded;
 import net.runelite.client.callback.Hooks;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -64,7 +88,7 @@ import java.util.List;
 @Slf4j
 @PluginDescriptor(name = "PVM Kits", description = "Multi-boss PVM assistance toolkit with mechanics overlays and timers", tags = {
         "combat", "boss", "pvm", "mechanics", "yama", "phosani", "nightmare", "verzik",
-    "tob", "maggot" }, enabledByDefault = false)
+    "tob", "maggot", "archive", "raids" }, enabledByDefault = false)
 public class PvmKitsPlugin extends Plugin {
 
     @Inject
@@ -146,10 +170,43 @@ public class PvmKitsPlugin extends Plugin {
     private MokhaiotlPrayerOverlay mokhaiotlPrayerOverlay;
 
     @Inject
+    private MokhaiotlArenaSimplifier mokhaiotlArenaSimplifier;
+
+    @Inject
+    private ArchiveArenaSimplifier archiveArenaSimplifier;
+
+    @Inject
+    private FracturedArchiveHandler fracturedArchiveHandler;
+
+    @Inject
+    private FracturedArchiveOverlay fracturedArchiveOverlay;
+
+    @Inject
+    private ArchiveTickEatOverlay archiveTickEatOverlay;
+
+    @Inject
+    private ArchivePrayerOverlay archivePrayerOverlay;
+
+    @Inject
     private PrayerFlickOverlay prayerFlickOverlay;
 
     @Inject
+    private StatusBarsOverlay statusBarsOverlay;
+
+    @Inject
+    private OwnHealthBarHider ownHealthBarHider;
+
+    @Inject
+    private OwnHitsplatHider ownHitsplatHider;
+
+    @Inject
     private LocatorOrbOverlay locatorOrbOverlay;
+
+    @Inject
+    private TeaFlaskOverlay teaFlaskOverlay;
+
+    @Inject
+    private TeaFlaskTracker teaFlaskTracker;
 
     @Inject
     private ClientToolbar clientToolbar;
@@ -199,6 +256,9 @@ public class PvmKitsPlugin extends Plugin {
         bossHandlers.add(shamanHandler);
         bossHandlers.add(vasaHandler);
         bossHandlers.add(mokhaiotlHandler);
+        // Last on purpose: its "Treat Any Instance As Archive" fallback would
+        // otherwise claim every other boss's instance.
+        bossHandlers.add(fracturedArchiveHandler);
 
         // TODO: Add other boss handlers here when implemented
         // bossHandlers.add(nyloHandler);
@@ -217,10 +277,16 @@ public class PvmKitsPlugin extends Plugin {
         overlayManager.add(vasaOverlay);
         overlayManager.add(mokhaiotlOverlay);
         overlayManager.add(mokhaiotlPrayerOverlay);
+        overlayManager.add(fracturedArchiveOverlay);
+        overlayManager.add(archiveTickEatOverlay);
+        overlayManager.add(archivePrayerOverlay);
         overlayManager.add(prayerFlickOverlay);
+        overlayManager.add(statusBarsOverlay);
         overlayManager.add(locatorOrbOverlay);
+        overlayManager.add(teaFlaskOverlay);
 
         hooks.registerRenderableDrawListener(orbDrawListener);
+        ownHealthBarHider.startUp();
 
         final BufferedImage icon = createPanelIcon();
         navButton = NavigationButton.builder()
@@ -254,10 +320,23 @@ public class PvmKitsPlugin extends Plugin {
         overlayManager.remove(vasaOverlay);
         overlayManager.remove(mokhaiotlOverlay);
         overlayManager.remove(mokhaiotlPrayerOverlay);
+        overlayManager.remove(fracturedArchiveOverlay);
+        overlayManager.remove(archiveTickEatOverlay);
+        overlayManager.remove(archivePrayerOverlay);
         overlayManager.remove(prayerFlickOverlay);
+        overlayManager.remove(statusBarsOverlay);
+        statusBarsOverlay.clearHitNumbers();
         overlayManager.remove(locatorOrbOverlay);
+        overlayManager.remove(teaFlaskOverlay);
+        teaFlaskTracker.reset();
 
         hooks.unregisterRenderableDrawListener(orbDrawListener);
+        ownHealthBarHider.shutDown();
+
+        // Put the arena floor back before we go, so a recoloured scene is never
+        // left behind when the plugin is switched off mid-fight.
+        mokhaiotlArenaSimplifier.shutDown();
+        archiveArenaSimplifier.shutDown();
 
         clientToolbar.removeNavigation(navButton);
 
@@ -275,6 +354,17 @@ public class PvmKitsPlugin extends Plugin {
         g.drawString("PK", 2, 11);
         g.dispose();
         return img;
+    }
+
+    // Feeds the game health bar hider every health bar definition the client loads.
+    @Subscribe
+    public void onPostHealthBarConfig(PostHealthBarConfig event) {
+        ownHealthBarHider.onHealthBarConfig(event.getHealthBarConfig());
+    }
+
+    @Subscribe
+    public void onBeforeRender(BeforeRender event) {
+        ownHealthBarHider.onBeforeRender();
     }
 
     @Subscribe
@@ -313,6 +403,27 @@ public class PvmKitsPlugin extends Plugin {
             }
         }
 
+        // Drive the Mokhaiotl "Simplify Arena" floor repaint. Deliberately not
+        // gated on the active handler: that needs the boss NPC, and the floor
+        // should already be flat on the way into the room rather than changing
+        // colour underfoot when the boss spawns. It finds the arena itself.
+        // Never let a failure here take the rest of the tick down with it: the
+        // floor repaint is cosmetic, but it runs before every handler below.
+        try {
+            mokhaiotlArenaSimplifier.update();
+        } catch (Exception e) {
+            log.error("Mokhaiotl Simplify Arena failed, disabling it for this session", e);
+            mokhaiotlArenaSimplifier.disableAfterError();
+        }
+        // The Archive Guardian's room has its own, sized for that longer room.
+        // Run after the Mokhaiotl one, which restores anything it painted there.
+        try {
+            archiveArenaSimplifier.update();
+        } catch (Exception e) {
+            log.error("Archive Simplify Arena failed, disabling it for this session", e);
+            archiveArenaSimplifier.disableAfterError();
+        }
+
         // Forward event to active boss handler
         if (activeBossHandler != null) {
             log.debug("PvmKitsPlugin.onGameTick: Forwarding to " + activeBossHandler.getBossName());
@@ -336,6 +447,28 @@ public class PvmKitsPlugin extends Plugin {
             tickPhaseAnchorMillis += Math.round(error * TICK_PHASE_CORRECTION_GAIN);
         }
         lastGameTickMillis = now;
+    }
+
+    // The client throws the scene's tiles away and rebuilds them on a load, so
+    // any floor we saved before it belongs to tiles that no longer exist. Drop
+    // the saved copy rather than writing it into the new scene; the next tick in
+    // the arena repaints the rebuilt floor.
+    @Subscribe
+    public void onGameStateChanged(GameStateChanged event) {
+        if (event.getGameState() == GameState.LOADING
+                || event.getGameState() == GameState.LOGIN_SCREEN
+                || event.getGameState() == GameState.HOPPING) {
+            mokhaiotlArenaSimplifier.onSceneRebuilding();
+            archiveArenaSimplifier.onSceneRebuilding();
+        }
+        // The tea flask count is saved per account; reload it after a logout in
+        // case a different account logs in.
+        if (event.getGameState() == GameState.LOGIN_SCREEN) {
+            teaFlaskTracker.reset();
+        }
+        // Always forwarded, so a load that began before the Archive logger latched
+        // still has its scenery kept out of the object spawn lines.
+        fracturedArchiveHandler.onGameStateChanged(event);
     }
 
     @Subscribe
@@ -380,6 +513,12 @@ public class PvmKitsPlugin extends Plugin {
         if (mokhaiotlHandler != null) {
             mokhaiotlHandler.onGameObjectSpawned(event);
         }
+        // Watches for the arena-centre object, which is how the floor repaint
+        // recognises the room without scanning the scene every tick.
+        mokhaiotlArenaSimplifier.onGameObjectSpawned(event);
+        if (activeBossHandler == fracturedArchiveHandler) {
+            fracturedArchiveHandler.onGameObjectSpawned(event);
+        }
     }
 
     @Subscribe
@@ -399,6 +538,25 @@ public class PvmKitsPlugin extends Plugin {
         }
         if (mokhaiotlHandler != null) {
             mokhaiotlHandler.onGameObjectDespawned(event);
+        }
+        mokhaiotlArenaSimplifier.onGameObjectDespawned(event);
+        if (activeBossHandler == fracturedArchiveHandler) {
+            fracturedArchiveHandler.onGameObjectDespawned(event);
+        }
+    }
+
+    // Only the Archive watches floor decorations: Dreadnoth's floor jelly may be one.
+    @Subscribe
+    public void onGroundObjectSpawned(GroundObjectSpawned event) {
+        if (activeBossHandler == fracturedArchiveHandler) {
+            fracturedArchiveHandler.onGroundObjectSpawned(event);
+        }
+    }
+
+    @Subscribe
+    public void onGroundObjectDespawned(GroundObjectDespawned event) {
+        if (activeBossHandler == fracturedArchiveHandler) {
+            fracturedArchiveHandler.onGroundObjectDespawned(event);
         }
     }
 
@@ -421,6 +579,72 @@ public class PvmKitsPlugin extends Plugin {
         if (activeBossHandler != null) {
             activeBossHandler.onHitsplatApplied(event);
         }
+        // After the handlers: it only takes the splat off the screen, the event's
+        // Hitsplat (and everything read from it) is unaffected.
+        ownHitsplatHider.onHitsplatApplied(event);
+        // Reads the same Hitsplat to start a number rising off the hitpoints number.
+        statusBarsOverlay.onHitsplatApplied(event);
+    }
+
+    // The events below are only used by the Fractured Archive discovery logger so
+    // far, so they go straight to it rather than through BossHandler.
+
+    // Per frame, for Moia's axe alert, which follows the blue attack-style tile's
+    // client-cycle timing rather than the game tick.
+    @Subscribe
+    public void onClientTick(ClientTick event) {
+        if (activeBossHandler == fracturedArchiveHandler) {
+            fracturedArchiveHandler.onClientTick();
+        }
+    }
+
+    @Subscribe
+    public void onNpcChanged(NpcChanged event) {
+        if (activeBossHandler == fracturedArchiveHandler) {
+            fracturedArchiveHandler.onNpcChanged(event);
+        }
+    }
+
+    @Subscribe
+    public void onChatMessage(ChatMessage event) {
+        teaFlaskTracker.onChatMessage(event);
+
+        if (activeBossHandler == fracturedArchiveHandler) {
+            fracturedArchiveHandler.onChatMessage(event);
+        }
+    }
+
+    @Subscribe
+    public void onWidgetLoaded(WidgetLoaded event) {
+        teaFlaskTracker.onWidgetLoaded(event);
+    }
+
+    @Subscribe
+    public void onItemContainerChanged(ItemContainerChanged event) {
+        teaFlaskTracker.onItemContainerChanged(event);
+    }
+
+    @Subscribe
+    public void onOverheadTextChanged(OverheadTextChanged event) {
+        if (activeBossHandler == fracturedArchiveHandler) {
+            fracturedArchiveHandler.onOverheadTextChanged(event);
+        }
+        // After the logger, so the cough is still recorded. A blank space is how the
+        // core Chat Filter hides overhead text too.
+        if (config.hideMoiaCough() && event.getActor() != null && event.getOverheadText() != null
+                && COUGH_TEXT.equalsIgnoreCase(event.getOverheadText().trim())) {
+            event.getActor().setOverheadText(" ");
+        }
+    }
+
+    // Said every 8 ticks by Moia's Undead binders, which she keeps spawning on your tile.
+    private static final String COUGH_TEXT = "*Cough*";
+
+    @Subscribe
+    public void onVarbitChanged(VarbitChanged event) {
+        if (activeBossHandler == fracturedArchiveHandler) {
+            fracturedArchiveHandler.onVarbitChanged(event);
+        }
     }
 
     // Re-ranks the Mokhaiotl menu once per build, after the client has sorted it. The
@@ -428,6 +652,8 @@ public class PvmKitsPlugin extends Plugin {
     // demonic larvae are pushed to the end to make Attack their default even while
     // they are stacked under the Doom, and the volatile earth statues outside the
     // highlighted pair are pushed to the front so they drop off left-click entirely.
+    // During the shockwave phase the larvae are pushed to the front with them
+    // instead, and go back to being promoted once the phase ends.
     private static final int MENU_RANK_DEMOTED = 0;
     private static final int MENU_RANK_DEFAULT = 1;
     private static final int MENU_RANK_PROMOTED = 2;
@@ -471,11 +697,20 @@ public class PvmKitsPlugin extends Plugin {
     // every entry on a demoted statue moves together and "Walk here" - which belongs
     // to no NPC - takes over the left click.
     private int menuRank(MenuEntry entry) {
-        if (config.mokhaiotlLarvaeMenuSwap() && MokhaiotlHandler.isLarva(entry.getNpc())) {
-            return MENU_RANK_PROMOTED;
+        boolean demoteForStatuePhase = config.showMokhaiotlStatues()
+                && mokhaiotlHandler.isStatuePhaseActive();
+        if (MokhaiotlHandler.isLarva(entry.getNpc())) {
+            // Larvae of every type come off left-click for the duration of the
+            // shockwave phase, for the same reason the unpaired statues do: the walk
+            // between the pair runs through them, and attacking one there costs the
+            // phase. They stay on right-click, and the normal Attack-first promotion
+            // resumes the moment the pair is gone.
+            if (demoteForStatuePhase) {
+                return MENU_RANK_DEMOTED;
+            }
+            return config.mokhaiotlLarvaeMenuSwap() ? MENU_RANK_PROMOTED : MENU_RANK_DEFAULT;
         }
-        if (config.mokhaiotlUnpairedStatueMenuDemote()
-                && mokhaiotlHandler.isUnhighlightedStatue(entry.getNpc())) {
+        if (demoteForStatuePhase && mokhaiotlHandler.isUnhighlightedStatue(entry.getNpc())) {
             return MENU_RANK_DEMOTED;
         }
         return MENU_RANK_DEFAULT;
@@ -545,6 +780,10 @@ public class PvmKitsPlugin extends Plugin {
 
     public MokhaiotlHandler getMokhaiotlHandler() {
         return mokhaiotlHandler;
+    }
+
+    public FracturedArchiveHandler getFracturedArchiveHandler() {
+        return fracturedArchiveHandler;
     }
 
     @Provides

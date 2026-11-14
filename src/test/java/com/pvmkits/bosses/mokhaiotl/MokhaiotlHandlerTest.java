@@ -51,6 +51,33 @@ public class MokhaiotlHandlerTest {
         assertFalse(MokhaiotlHandler.isStraightPair(origin, new WorldPoint(3007, 3001, 0), 1, 8));
     }
 
+    // When no tier matches at all, the last-resort pick ranks pairs so that the most
+    // nearly straight one always wins, however much separation or proximity the
+    // crooked alternatives offer.
+    @Test
+    public void lastResortPairPrefersTheStraightestPairOverALongerCrookedOne() {
+        WorldPoint player = new WorldPoint(3000, 3000, 0);
+        WorldPoint origin = new WorldPoint(3000, 3000, 0);
+
+        int nearlyStraight = MokhaiotlHandler.lastResortPairScore(
+                origin, new WorldPoint(3006, 3002, 0), player);
+        int longButCrooked = MokhaiotlHandler.lastResortPairScore(
+                origin, new WorldPoint(3020, 3006, 0), player);
+        assertTrue(nearlyStraight < longButCrooked);
+
+        // Among equally crooked pairs the longer walk wins.
+        int shortLeg = MokhaiotlHandler.lastResortPairScore(
+                origin, new WorldPoint(3006, 3002, 0), player);
+        int longLeg = MokhaiotlHandler.lastResortPairScore(
+                origin, new WorldPoint(3014, 3002, 0), player);
+        assertTrue(longLeg < shortLeg);
+
+        // A perfectly straight pair still beats anything off-axis.
+        int straight = MokhaiotlHandler.lastResortPairScore(
+                origin, new WorldPoint(3005, 3000, 0), player);
+        assertTrue(straight < nearlyStraight);
+    }
+
     @Test
     public void statuesInsideTheBossMeleeBufferRingAreNotUsableEndpoints() {
         WorldPoint bossCentre = new WorldPoint(3000, 3000, 0);

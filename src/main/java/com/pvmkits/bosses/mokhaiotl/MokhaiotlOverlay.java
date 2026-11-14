@@ -30,23 +30,41 @@ import java.util.Set;
 public class MokhaiotlOverlay extends Overlay {
 
     private static final int BOSS_SIZE = 5; // Doom is 5x5 tiles
+    // Base opacity of every area fill in the fight. Kept low so the arena stays
+    // readable under overlapping highlights; the tiles that must not be missed are
+    // boosted off it (see BOULDER_FILL_ALPHA_BOOST, DASH_FILL_ALPHA_BOOST).
+    private static final int FILL_ALPHA = 30;
     // Ground patch drawn under a highlighted statue, centred on the statue's tile.
     private static final int STATUE_GROUND_SIZE = 3;
-    private static final Color BOULDER_TILE_COLOR = new Color(232, 154, 154);
+    // A deep red, kept for the one shard of a shatter that is aimed at the tile the
+    // player was standing on: that one is a flat "move now", so it is the darkest,
+    // most opaque red in the fight.
+    private static final Color BOULDER_TILE_COLOR = new Color(170, 20, 20);
+    // The shatter's other shards. They land on tiles the player is not on, so they
+    // only need to read as "do not walk into these": a light pastel orange, drawn
+    // well under the red so the forced-move tile stays the thing the eye lands on.
+    private static final Color BOULDER_OTHER_TILE_COLOR = new Color(255, 190, 130);
+    // Added to the base fill alpha for the forced-move shatter tile only, so it
+    // stays solid while the rest of the highlights sit well under it.
+    private static final int BOULDER_FILL_ALPHA_BOOST = 90;
+    // The other shards get no boost and are scaled down from the base fill, so they
+    // stay the faintest thing on screen.
+    private static final float BOULDER_OTHER_FILL_SCALE = 0.45f;
+    private static final int BOULDER_OTHER_BORDER_ALPHA = 120;
     private static final Color SHIELD_TILE_COLOR = new Color(170, 190, 235);
     private static final Color MELEE_PUNISH_TILE_COLOR = new Color(225, 150, 165); // pastel red
     // The same pastel red as the melee-punish tile, so the fight's two "get out of
     // the way" highlights read as one colour. It is the one that must not be missed
     // though, so it is drawn a shade stronger than the rest (see DASH_*_BOOST).
     private static final Color DASH_PATH_COLOR = MELEE_PUNISH_TILE_COLOR;
-    // Added to the configured fill alpha for the dash path only.
+    // Added to the base fill alpha for the dash path only.
     private static final int DASH_FILL_ALPHA_BOOST = 45;
     // Added on top of that again for the path's outer perimeter stroke.
     private static final int DASH_BORDER_ALPHA_BOOST = 145;
     private static final Color STATUE_COLOR = new Color(119, 221, 119); // pastel green
     private static final Color STATUE_ATTACKED_COLOR = new Color(255, 105, 97); // pastel red
     // The pair's second statue while it is still waiting its turn: off-white grey,
-    // drawn at a fraction of the configured fill so it reads as dormant.
+    // drawn at a fraction of the base fill so it reads as dormant.
     private static final Color STATUE_DORMANT_COLOR = new Color(225, 225, 225);
     private static final float DORMANT_FILL_SCALE = 0.3f;
     private static final int DORMANT_BORDER_ALPHA = 110;
@@ -58,8 +76,12 @@ public class MokhaiotlOverlay extends Overlay {
     // enough to read as a colour rather than a flicker, quick enough that the marks
     // are visibly alive next to the fight's static highlights.
     private static final long RAINBOW_CYCLE_MS = 3000L;
+
     private static final Color ORB_TILE_COLOR = new Color(255, 179, 71); // pastel orange
     private static final Color DEFAULT_BORDER_COLOR = Color.WHITE;
+    // Shockwave countdown text size, in px.
+    private static final int TIMER_FONT_SIZE = 20;
+
     private static final BasicStroke BORDER_STROKE = new BasicStroke(1);
     private static final BasicStroke PATH_BORDER_STROKE = new BasicStroke(2);
 
@@ -132,10 +154,12 @@ public class MokhaiotlOverlay extends Overlay {
         }
 
         Color base = null;
-        if (handler.isShieldPhase() && config.showMokhaiotlShieldTile()) {
-            base = SHIELD_TILE_COLOR;
-        } else if (handler.isMeleePunishActive() && config.showMokhaiotlMeleePunishTile()) {
-            base = MELEE_PUNISH_TILE_COLOR;
+        if (config.showMokhaiotlBossPhaseTile()) {
+            if (handler.isShieldPhase()) {
+                base = SHIELD_TILE_COLOR;
+            } else if (handler.isMeleePunishActive()) {
+                base = MELEE_PUNISH_TILE_COLOR;
+            }
         }
 
         if (base != null) {
@@ -145,46 +169,38 @@ public class MokhaiotlOverlay extends Overlay {
             renderThinBorder(graphics, poly, DEFAULT_BORDER_COLOR);
         }
 
-        // Highlight the 3 center tiles on the side of the boss that correlates to the remaining rainbow tiles with boulders
-        if (handler.isShieldPhase()) {
-            Set<WorldPoint> eyes = handler.getEyeSpawnTiles();
-            Set<WorldPoint> boulders = handler.getBoulderObjectTiles();
-            WorldPoint center = boss.getWorldLocation().dx(2).dy(2);
+        // One rainbow marker per eye tile that has a boulder on it, pointing from the
+        // boss towards that tile. It sits two tiles clear of the 5x5 footprint's edge
+        // (offset 4 from the centre), so there is a one-tile gap between the boss
+        // overlay and the marker and the two never read as one shape.
+        if (handler.isShieldPhase() && config.showMokhaiotlEyeSpawnTiles()) {
+            renderEyeDirectionMarkers(graphics, handler, boss);
+        }
+    }
 
-            for (WorldPoint eye : eyes) {
-                if (boulders.contains(eye)) {
-                    int dx = eye.getX() - center.getX();
-                    int dy = eye.getY() - center.getY();
+    // Offset from the boss's centre tile to the direction marker: BOSS_SIZE / 2 = 2
+    // for the footprint's edge, one tile of gap, then the marker itself.
+    private static final int EYE_DIRECTION_MARKER_OFFSET = BOSS_SIZE / 2 + 2;
 
-                    Color rainbow = rainbowColor();
+    private void renderEyeDirectionMarkers(Graphics2D graphics, MokhaiotlHandler handler, NPC boss) {
+        Set<WorldPoint> eyes = handler.getEyeSpawnTiles();
+        if (eyes.isEmpty()) {
+            return;
+        }
+        Set<WorldPoint> boulders = handler.getBoulderObjectTiles();
+        WorldPoint centre = boss.getWorldLocation().dx(BOSS_SIZE / 2).dy(BOSS_SIZE / 2);
+        int d = EYE_DIRECTION_MARKER_OFFSET;
 
-                    if (Math.abs(dx) > Math.abs(dy)) {
-                        if (dx > 0) {
-                            // East
-                            renderWorldTile(graphics, center.dx(2).dy(-1), rainbow, BORDER_STROKE);
-                            renderWorldTile(graphics, center.dx(2).dy(0), rainbow, BORDER_STROKE);
-                            renderWorldTile(graphics, center.dx(2).dy(1), rainbow, BORDER_STROKE);
-                        } else {
-                            // West
-                            renderWorldTile(graphics, center.dx(-2).dy(-1), rainbow, BORDER_STROKE);
-                            renderWorldTile(graphics, center.dx(-2).dy(0), rainbow, BORDER_STROKE);
-                            renderWorldTile(graphics, center.dx(-2).dy(1), rainbow, BORDER_STROKE);
-                        }
-                    } else {
-                        if (dy > 0) {
-                            // North
-                            renderWorldTile(graphics, center.dx(-1).dy(2), rainbow, BORDER_STROKE);
-                            renderWorldTile(graphics, center.dx(0).dy(2), rainbow, BORDER_STROKE);
-                            renderWorldTile(graphics, center.dx(1).dy(2), rainbow, BORDER_STROKE);
-                        } else {
-                            // South
-                            renderWorldTile(graphics, center.dx(-1).dy(-2), rainbow, BORDER_STROKE);
-                            renderWorldTile(graphics, center.dx(0).dy(-2), rainbow, BORDER_STROKE);
-                            renderWorldTile(graphics, center.dx(1).dy(-2), rainbow, BORDER_STROKE);
-                        }
-                    }
-                }
+        for (WorldPoint eye : eyes) {
+            if (!boulders.contains(eye)) {
+                continue;
             }
+            int dx = eye.getX() - centre.getX();
+            int dy = eye.getY() - centre.getY();
+            WorldPoint marker = Math.abs(dx) > Math.abs(dy)
+                    ? centre.dx(dx > 0 ? d : -d)
+                    : centre.dy(dy > 0 ? d : -d);
+            renderWorldTile(graphics, marker, rainbowColor(), BORDER_STROKE);
         }
     }
 
@@ -230,8 +246,8 @@ public class MokhaiotlOverlay extends Overlay {
                 // A dormant statue is washed out so it cannot be mistaken for the one to
                 // hit, but stays visible enough to show where the pair runs.
                 int fillAlpha = dormant
-                        ? Math.round(config.mokhaiotlTransparency() * DORMANT_FILL_SCALE)
-                        : config.mokhaiotlTransparency();
+                        ? Math.round(FILL_ALPHA * DORMANT_FILL_SCALE)
+                        : FILL_ALPHA;
                 Color border = dormant ? withAlpha(base, DORMANT_BORDER_ALPHA) : base;
 
                 if (ground != null) {
@@ -289,7 +305,7 @@ public class MokhaiotlOverlay extends Overlay {
                 java.awt.Composite old = graphics.getComposite();
                 graphics.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC));
                 Color base = rainbowColor();
-                graphics.setColor(withAlpha(base, config.mokhaiotlTransparency()));
+                graphics.setColor(withAlpha(base, FILL_ALPHA));
                 graphics.fill(poly);
                 graphics.setColor(base);
                 graphics.setStroke(BORDER_STROKE);
@@ -332,8 +348,7 @@ public class MokhaiotlOverlay extends Overlay {
 
     private void renderTimerText(Graphics2D graphics, java.awt.Rectangle r, int number) {
         String text = String.valueOf(number);
-        int fontSize = Math.max(16, config.mokhaiotlTimerTextSize());
-        graphics.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, fontSize));
+        graphics.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, TIMER_FONT_SIZE));
         java.awt.FontMetrics metrics = graphics.getFontMetrics();
         int x = r.x + r.width / 2 - metrics.stringWidth(text) / 2;
         int y = r.y + r.height / 2 + metrics.getHeight() / 4;
@@ -397,9 +412,40 @@ public class MokhaiotlOverlay extends Overlay {
         if (tiles.isEmpty()) {
             return;
         }
-        Color base = BOULDER_TILE_COLOR;
+        Set<WorldPoint> locked = handler.getPlayerLockedBoulderTiles();
+
+        Color otherFill = withAlpha(BOULDER_OTHER_TILE_COLOR,
+                Math.round(FILL_ALPHA * BOULDER_OTHER_FILL_SCALE));
+        Color otherBorder = withAlpha(BOULDER_OTHER_TILE_COLOR, BOULDER_OTHER_BORDER_ALPHA);
+        Color lockedFill = withAlpha(BOULDER_TILE_COLOR,
+                FILL_ALPHA + BOULDER_FILL_ALPHA_BOOST);
+
+        // The other shards first, so the forced-move tile is drawn over them where a
+        // shatter puts two shards on the same tile.
+        graphics.setStroke(BORDER_STROKE);
         for (WorldPoint tile : tiles) {
-            renderWorldTile(graphics, tile, base, BORDER_STROKE);
+            if (locked.contains(tile)) {
+                continue;
+            }
+            Polygon poly = worldTilePoly(tile);
+            if (poly == null) {
+                continue;
+            }
+            graphics.setColor(otherFill);
+            graphics.fill(poly);
+            graphics.setColor(otherBorder);
+            graphics.draw(poly);
+        }
+
+        for (WorldPoint tile : locked) {
+            Polygon poly = worldTilePoly(tile);
+            if (poly == null) {
+                continue;
+            }
+            graphics.setColor(lockedFill);
+            graphics.fill(poly);
+            graphics.setColor(BOULDER_TILE_COLOR);
+            graphics.draw(poly);
         }
     }
 
@@ -413,9 +459,9 @@ public class MokhaiotlOverlay extends Overlay {
             return;
         }
         Color base = DASH_PATH_COLOR;
-        Color fill = withAlpha(base, config.mokhaiotlTransparency() + DASH_FILL_ALPHA_BOOST);
+        Color fill = withAlpha(base, FILL_ALPHA + DASH_FILL_ALPHA_BOOST);
         Color border = withAlpha(base,
-                config.mokhaiotlTransparency() + DASH_FILL_ALPHA_BOOST + DASH_BORDER_ALPHA_BOOST);
+                FILL_ALPHA + DASH_FILL_ALPHA_BOOST + DASH_BORDER_ALPHA_BOOST);
 
         // Fill every path tile.
         for (WorldPoint tile : path) {
@@ -451,7 +497,7 @@ public class MokhaiotlOverlay extends Overlay {
     // delve. Cycled through the spectrum so they read as a standing reference mark
     // rather than one of the fight's "move now" warnings, none of which animate.
     //
-    // Once the shield phase starts the marks are hidden — they served their purpose
+    // Once the shield phase starts the marks are hidden - they served their purpose
     // before the shield. The exception is any eye-spawn tile that still has a live
     // boulder ground object on it: that tile stays rainbow-highlighted until the
     // boulder is removed, so the player can see the boulder is sitting on an eye
@@ -466,11 +512,11 @@ public class MokhaiotlOverlay extends Overlay {
         Set<WorldPoint> boulderObjectTiles = shieldActive ? handler.getBoulderObjectTiles() : null;
 
         Color base = rainbowColor();
-        
-        boolean showWarning = handler.getDepthLevel() == 7 
-            && handler.getEyeSpawnTick() != -1 
-            && (client.getTickCount() - handler.getEyeSpawnTick()) <= 16;
-            
+
+        boolean showWarning = handler.getDepthLevel() == 7
+                && handler.getEyeSpawnTick() != -1
+                && (client.getTickCount() - handler.getEyeSpawnTick()) <= 16;
+
         boolean flashOn = (client.getTickCount() % 2) == 0;
 
         for (WorldPoint tile : tiles) {
@@ -480,7 +526,7 @@ public class MokhaiotlOverlay extends Overlay {
             }
 
             renderWorldTile(graphics, tile, base, BORDER_STROKE);
-            
+
             if (!shieldActive && showWarning && flashOn) {
                 Polygon poly = worldTilePoly(tile);
                 if (poly != null) {
@@ -490,13 +536,13 @@ public class MokhaiotlOverlay extends Overlay {
                     java.awt.FontMetrics metrics = graphics.getFontMetrics();
                     int x = r.x + r.width / 2 - metrics.stringWidth(text) / 2;
                     int y = r.y + r.height + metrics.getHeight();
-                    
+
                     graphics.setColor(Color.BLACK);
                     graphics.drawString(text, x - 1, y - 1);
                     graphics.drawString(text, x + 1, y - 1);
                     graphics.drawString(text, x - 1, y + 1);
                     graphics.drawString(text, x + 1, y + 1);
-                    
+
                     graphics.setColor(Color.RED);
                     graphics.drawString(text, x, y);
                 }
@@ -564,7 +610,7 @@ public class MokhaiotlOverlay extends Overlay {
     }
 
     private void fillAndOutline(Graphics2D graphics, Polygon poly, Color base, BasicStroke stroke) {
-        graphics.setColor(withAlpha(base, config.mokhaiotlTransparency()));
+        graphics.setColor(withAlpha(base, FILL_ALPHA));
         graphics.fill(poly);
         graphics.setColor(base);
         graphics.setStroke(stroke);

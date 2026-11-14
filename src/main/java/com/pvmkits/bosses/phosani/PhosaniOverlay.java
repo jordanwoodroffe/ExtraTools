@@ -277,21 +277,20 @@ public class PhosaniOverlay extends Overlay {
                     // Position timer below the base tile center (at feet level)
                     int stableY = tileRect.y + tileRect.height;
 
-                    // Set text properties - make text bigger
+                    // Same styling as the Attack Timer Metronome plugin's tick number with
+                    // its "Bold" font type, drawn with OverlayUtil's 1px black drop shadow.
+                    // The metronome asks for a font named "Bold", which Java doesn't have,
+                    // so it falls back to bold Dialog - use that directly.
                     String timerText = String.valueOf(attackTimer);
-                    int fontSize = Math.max(20, config.phosaniTimerTextSize() + 8); // Minimum 24px, +8 from config
-                    java.awt.Font font = new java.awt.Font("Arial", java.awt.Font.BOLD, fontSize);
-                    graphics.setFont(font);
+                    graphics.setFont(new Font(Font.DIALOG, Font.BOLD, config.phosaniTimerTextSize()));
 
-                    java.awt.FontMetrics metrics = graphics.getFontMetrics();
-                    int textWidth = metrics.stringWidth(timerText);
-                    int textHeight = metrics.getHeight();
-                    int textX = centerX - (textWidth / 2);
-                    int textY = stableY + (textHeight / 4);
+                    FontMetrics metrics = graphics.getFontMetrics();
+                    int textX = centerX - (metrics.stringWidth(timerText) / 2);
+                    int textY = stableY + (metrics.getHeight() / 4);
 
-                    // Draw main text - use config color
-                    graphics.setColor(config.phosaniAttackTimerColor());
-                    graphics.drawString(timerText, textX, textY);
+                    // Red on the final tick so the incoming attack stands out.
+                    OverlayUtil.renderTextLocation(graphics, new net.runelite.api.Point(textX, textY), timerText,
+                            attackTimer == 1 ? Color.RED : Color.WHITE);
                 }
             }
         }
